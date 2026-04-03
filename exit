@@ -1,0 +1,1402 @@
+[33mcommit a273288b1539f52029cd93e1d71ac7565e9906cb[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m
+Author: Hornet <frogy335@gmail.com>
+Date:   Fri Apr 3 20:40:59 2026 +0300
+
+    Первая стабильная MVP
+
+[1mdiff --git a/.env b/.env[m
+[1mnew file mode 100644[m
+[1mindex 0000000..0408006[m
+[1m--- /dev/null[m
+[1m+++ b/.env[m
+[36m@@ -0,0 +1,2 @@[m
+[32m+[m[32mBOT_TOKEN=8775585901:AAFZov4Wen_b3AbMgj9kpPFeQqxynEr73b8[m
+[32m+[m[32mADMIN_ID=1956668636[m
+\ No newline at end of file[m
+[1mdiff --git a/.gitignore b/.gitignore[m
+[1mnew file mode 100644[m
+[1mindex 0000000..40b878d[m
+[1m--- /dev/null[m
+[1m+++ b/.gitignore[m
+[36m@@ -0,0 +1 @@[m
+[32m+[m[32mnode_modules/[m
+\ No newline at end of file[m
+[1mdiff --git a/bot-state.json b/bot-state.json[m
+[1mnew file mode 100644[m
+[1mindex 0000000..985e779[m
+[1m--- /dev/null[m
+[1m+++ b/bot-state.json[m
+[36m@@ -0,0 +1,4 @@[m
+[32m+[m[32m{[m
+[32m+[m[32m  "seq": 1,[m
+[32m+[m[32m  "orders": {}[m
+[32m+[m[32m}[m
+\ No newline at end of file[m
+[1mdiff --git a/bot.js b/bot.js[m
+[1mnew file mode 100644[m
+[1mindex 0000000..4123eab[m
+[1m--- /dev/null[m
+[1m+++ b/bot.js[m
+[36m@@ -0,0 +1,1136 @@[m
+[32m+[m[32mrequire('dotenv').config();[m
+[32m+[m
+[32m+[m[32mconst fs = require('fs');[m
+[32m+[m[32mconst path = require('path');[m
+[32m+[m[32mconst { Telegraf, session, Markup } = require('telegraf');[m
+[32m+[m
+[32m+[m[32mconst BOT_TOKEN = process.env.BOT_TOKEN;[m
+[32m+[m[32mconst ADMIN_ID = Number(process.env.ADMIN_ID);[m
+[32m+[m[32mconst STATE_FILE = path.join(__dirname, 'bot-state.json');[m
+[32m+[m[32mconst MIN_PRICE_BYN = 4;[m
+[32m+[m[32mconst MAX_PRICE_BYN = 20;[m
+[32m+[m
+[32m+[m[32mconst DEADLINES = {[m
+[32m+[m[32m  urgent: { label: 'Срочно', factor: 1.55, description: 'максимальный приоритет' },[m
+[32m+[m[32m  today: { label: 'Сегодня', factor: 1.35, description: 'в течение дня' },[m
+[32m+[m[32m  tomorrow: { label: 'Завтра', factor: 1.15, description: 'до завтра' },[m
+[32m+[m[32m  week: { label: 'Без спешки', factor: 1, description: 'оптимальный тариф' }[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mconst LEVELS = {[m
+[32m+[m[32m  basic: { label: 'Стандарт', factor: 1, description: 'быстро и по делу' },[m
+[32m+[m[32m  strong: { label: 'Усиленный', factor: 1.2, description: 'глубже и точнее' },[m
+[32m+[m[32m  premium: { label: 'Максимум', factor: 1.45, description: 'максимальная проработка' }[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mconst STAGES = {[m
+[32m+[m[32m  pending_review: '🕓 На рассмотрении',[m
+[32m+[m[32m  priced: '💵 Цена назначена',[m
+[32m+[m[32m  in_progress: '🚧 В работе',[m
+[32m+[m[32m  done: '✅ Готово',[m
+[32m+[m[32m  rejected: '⛔ Отклонён',[m
+[32m+[m[32m  cancelled: '❌ Отменён'[m
+[32m+[m[32m};[m
+[32m+[m
+[32m+[m[32mfunction ensureEnv() {[m
+[32m+[m[32m  if (!BOT_TOKEN) {[m
+[32m+[m[32m    throw new Error('Нет BOT_TOKEN');[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if (!Number.isInteger(ADMIN_ID) || ADMIN_ID <= 0) {[m
+[32m+[m[32m    throw new Error('Нет корректного ADMIN_ID');[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction loadState() {[m
+[32m+[m[32m  if (!fs.existsSync(STATE_FILE)) {[m
+[32m+[m[32m    return { seq: 1, orders: {} };[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));[m
+[32m+[m[32m    return {[m
+[32m+[m[32m      seq: Number.isInteger(raw.seq) && raw.seq > 0 ? raw.seq : 1,[m
+[32m+[m[32m      orders: raw.orders && typeof raw.orders === 'object' ? raw.orders : {}[m
+[32m+[m[32m    };[m
+[32m+[m[32m  } catch {[m
+[32m+[m[32m    return { seq: 1, orders: {} };[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mconst state = loadState();[m
+[32m+[m
+[32m+[m[32mfunction persistState() {[m
+[32m+[m[32m  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf8');[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction escapeHtml(value) {[m
+[32m+[m[32m  return String(value ?? '')[m
+[32m+[m[32m    .replace(/&/g, '&amp;')[m
+[32m+[m[32m    .replace(/</g, '&lt;')[m
+[32m+[m[32m    .replace(/>/g, '&gt;')[m
+[32m+[m[32m    .replace(/"/g, '&quot;');[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction formatMoney(value) {[m
+[32m+[m[32m  return `${new Intl.NumberFormat('ru-BY', {[m
+[32m+[m[32m    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,[m
+[32m+[m[32m    maximumFractionDigits: 2[m
+[32m+[m[32m  }).format(value)} BYN`;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction formatDate(value) {[m
+[32m+[m[32m  return new Intl.DateTimeFormat('ru-RU', {[m
+[32m+[m[32m    day: '2-digit',[m
+[32m+[m[32m    month: '2-digit',[m
+[32m+[m[32m    year: 'numeric',[m
+[32m+[m[32m    hour: '2-digit',[m
+[32m+[m[32m    minute: '2-digit'[m
+[32m+[m[32m  }).format(new Date(value));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction createOrderId(seq) {[m
+[32m+[m[32m  return `ORD-${String(seq).padStart(4, '0')}`;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getUserName(user) {[m
+[32m+[m[32m  const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ').trim();[m
+[32m+[m
+[32m+[m[32m  if (fullName) {[m
+[32m+[m[32m    return fullName;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if (user.username) {[m
+[32m+[m[32m    return `@${user.username}`;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return `ID ${user.id}`;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getUserUsername(user) {[m
+[32m+[m[32m  return user.username ? `@${user.username}` : '';[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getClientIdentity(order) {[m
+[32m+[m[32m  const parts = [];[m
+[32m+[m
+[32m+[m[32m  if (order.clientName) {[m
+[32m+[m[32m    parts.push(escapeHtml(order.clientName));[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if (order.clientUsername && order.clientUsername !== order.clientName) {[m
+[32m+[m[32m    parts.push(escapeHtml(order.clientUsername));[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  parts.push(`(${order.clientId})`);[m
+[32m+[m
+[32m+[m[32m  return parts.join(' ');[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getStageLabel(stage) {[m
+[32m+[m[32m  if (stage === 'picked_up') {[m
+[32m+[m[32m    return STAGES.done;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return STAGES[stage] || stage;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getDeadlineLabel(deadline) {[m
+[32m+[m[32m  return DEADLINES[deadline]?.label || deadline;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getLevelLabel(level) {[m
+[32m+[m[32m  return LEVELS[level]?.label || level;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getEstimatedPrice(draft) {[m
+[32m+[m[32m  const taskLength = draft.task.trim().length;[m
+[32m+[m[32m  const hasRequirements = Boolean(draft.requirements && draft.requirements !== 'Без дополнительных требований');[m
+[32m+[m[32m  const attachmentsCount = Array.isArray(draft.attachments) ? draft.attachments.length : 0;[m
+[32m+[m
+[32m+[m[32m  let price = 4;[m
+[32m+[m[32m  price += Math.min(taskLength / 40, 4.5);[m
+[32m+[m
+[32m+[m[32m  if (hasRequirements) {[m
+[32m+[m[32m    price += 1.5;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if (attachmentsCount > 0) {[m
+[32m+[m[32m    price += Math.min(attachmentsCount * 0.75, 2);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  price = price * (DEADLINES[draft.deadline]?.factor || 1);[m
+[32m+[m[32m  price = price * (LEVELS[draft.level]?.factor || 1);[m
+[32m+[m[32m  price = Math.round(price * 2) / 2;[m
+[32m+[m
+[32m+[m[32m  return Math.min(MAX_PRICE_BYN, Math.max(MIN_PRICE_BYN, price));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction isAdmin(ctx) {[m
+[32m+[m[32m  return ctx.from?.id === ADMIN_ID;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getMainKeyboard(adminMode) {[m
+[32m+[m[32m  const rows = [[m
+[32m+[m[32m    ['✨ Новый заказ', '📦 Мои заказы'],[m
+[32m+[m[32m    ['ℹ️ Как это работает', '❌ Сбросить'][m
+[32m+[m[32m  ];[m
+[32m+[m
+[32m+[m[32m  if (adminMode) {[m
+[32m+[m[32m    rows.unshift(['🛠 Админ-панель']);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return Markup.keyboard(rows).resize();[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getAttachmentControls() {[m
+[32m+[m[32m  return Markup.inlineKeyboard([[m
+[32m+[m[32m    [Markup.button.callback('🚀 Отправить заказ', 'draft:submit')],[m
+[32m+[m[32m    [Markup.button.callback('↩️ Вернуться к карточке', 'draft:summary')][m
+[32m+[m[32m  ]);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getAdminOrderControls(order) {[m
+[32m+[m[32m  const rows = [];[m
+[32m+[m
+[32m+[m[32m  if (order.stage === 'pending_review') {[m
+[32m+[m[32m    rows.push([[m
+[32m+[m[32m      Markup.button.callback('💵 Назначить цену', `admin:price:${order.id}`),[m
+[32m+[m[32m      Markup.button.callback('⛔ Отклонить', `admin:reject:${order.id}`)[m
+[32m+[m[32m    ]);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if (order.stage === 'priced') {[m
+[32m+[m[32m    rows.push([[m
+[32m+[m[32m      Markup.button.callback('🚧 В работу', `admin:start:${order.id}`),[m
+[32m+[m[32m      Markup.button.callback('✅ Завершить', `admin:done:${order.id}`)[m
+[32m+[m[32m    ]);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if (order.stage === 'in_progress') {[m
+[32m+[m[32m    rows.push([Markup.button.callback('✅ Завершить', `admin:done:${order.id}`)]);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  rows.push([Markup.button.callback('🧾 Детали', `admin:details:${order.id}`)]);[m
+[32m+[m
+[32m+[m[32m  return Markup.inlineKeyboard(rows);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getUserOrderControls(order) {[m
+[32m+[m[32m  const rows = [[Markup.button.callback('🔎 Обновить', `user:details:${order.id}`)]];[m
+[32m+[m
+[32m+[m[32m  if (['pending_review', 'priced', 'in_progress'].includes(order.stage)) {[m
+[32m+[m[32m    rows.push([Markup.button.callback('❌ Отменить заказ', `user:cancel:${order.id}`)]);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return Markup.inlineKeyboard(rows);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getDraftSummaryKeyboard() {[m
+[32m+[m[32m  return Markup.inlineKeyboard([[m
+[32m+[m[32m    [Markup.button.callback('📎 Добавить файлы', 'draft:attachments')],[m
+[32m+[m[32m    [Markup.button.callback('🚀 Отправить заказ', 'draft:submit')],[m
+[32m+[m[32m    [Markup.button.callback('🔁 Начать заново', 'draft:restart')][m
+[32m+[m[32m  ]);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getOrdersArray() {[m
+[32m+[m[32m  return Object.values(state.orders).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getOrdersByUser(userId) {[m
+[32m+[m[32m  return getOrdersArray().filter((order) => order.clientId === userId);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getActiveOrders() {[m
+[32m+[m[32m  return getOrdersArray().filter((order) => ['pending_review', 'priced', 'in_progress'].includes(order.stage));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getAttentionOrders() {[m
+[32m+[m[32m  return getOrdersArray().filter((order) => ['pending_review', 'priced', 'in_progress', 'done'].includes(order.stage));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction getStats() {[m
+[32m+[m[32m  const orders = getOrdersArray();[m
+[32m+[m[32m  const total = orders.length;[m
+[32m+[m[32m  const active = orders.filter((order) => ['pending_review', 'priced', 'in_progress'].includes(order.stage)).length;[m
+[32m+[m[32m  const completed = orders.filter((order) => ['done', 'picked_up'].includes(order.stage));[m
+[32m+[m[32m  const revenue = completed.reduce((sum, order) => sum + (order.finalPrice || 0), 0);[m
+[32m+[m
+[32m+[m[32m  return {[m
+[32m+[m[32m    total,[m
+[32m+[m[32m    active,[m
+[32m+[m[32m    done: completed.length,[m
+[32m+[m[32m    pending: orders.filter((order) => order.stage === 'pending_review').length,[m
+[32m+[m[32m    priced: orders.filter((order) => order.stage === 'priced').length,[m
+[32m+[m[32m    inProgress: orders.filter((order) => order.stage === 'in_progress').length,[m
+[32m+[m[32m    rejected: orders.filter((order) => order.stage === 'rejected').length,[m
+[32m+[m[32m    cancelled: orders.filter((order) => order.stage === 'cancelled').length,[m
+[32m+[m[32m    revenue[m
+[32m+[m[32m  };[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildOrderSummary(order, options = {}) {[m
+[32m+[m[32m  const lines = [];[m
+[32m+[m
+[32m+[m[32m  lines.push(`<b>${options.title || `Заказ ${order.id}`}</b>`);[m
+[32m+[m[32m  lines.push('');[m
+[32m+[m[32m  lines.push(`<b>Статус:</b> ${escapeHtml(getStageLabel(order.stage))}`);[m
+[32m+[m[32m  lines.push(`<b>Задача:</b> ${escapeHtml(order.task)}`);[m
+[32m+[m[32m  lines.push(`<b>Срок:</b> ${escapeHtml(getDeadlineLabel(order.deadline))}`);[m
+[32m+[m[32m  lines.push(`<b>Пакет:</b> ${escapeHtml(getLevelLabel(order.level))}`);[m
+[32m+[m[32m  lines.push(`<b>Требования:</b> ${escapeHtml(order.requirements || 'Без дополнительных требований')}`);[m
+[32m+[m[32m  lines.push(`<b>Вложения:</b> ${order.attachments.length}`);[m
+[32m+[m[32m  lines.push(`<b>Создан:</b> ${escapeHtml(formatDate(order.createdAt))}`);[m
+[32m+[m
+[32m+[m[32m  if (order.estimatedPrice) {[m
+[32m+[m[32m    lines.push(`<b>Предварительная оценка:</b> ${escapeHtml(formatMoney(order.estimatedPrice))}`);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if (order.finalPrice) {[m
+[32m+[m[32m    lines.push(`<b>Финальная цена:</b> ${escapeHtml(formatMoney(order.finalPrice))}`);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  if (options.includeClient) {[m
+[32m+[m[32m    lines.push(`<b>Клиент:</b> ${getClientIdentity(order)}`);[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return lines.join('\n');[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildUserOrdersText(orders) {[m
+[32m+[m[32m  if (!orders.length) {[m
+[32m+[m[32m    return 'Пока заказов нет. Нажми <b>✨ Новый заказ</b>, и я соберу заявку в красивую карточку.';[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return [[m
+[32m+[m[32m    '<b>Твои заказы</b>',[m
+[32m+[m[32m    '',[m
+[32m+[m[32m    ...orders.slice(0, 8).map((order) => {[m
+[32m+[m[32m      const price = order.finalPrice || order.estimatedPrice;[m
+[32m+[m[32m      return `• <b>${order.id}</b> — ${escapeHtml(getStageLabel(order.stage))} — ${escapeHtml(formatMoney(price))}`;[m
+[32m+[m[32m    })[m
+[32m+[m[32m  ].join('\n');[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildUserOrdersKeyboard(orders) {[m
+[32m+[m[32m  const rows = orders.slice(0, 8).map((order) => [[m
+[32m+[m[32m    Markup.button.callback(`${order.id} • ${getStageLabel(order.stage).replace(/^[^\s]+\s/, '')}`, `user:details:${order.id}`)[m
+[32m+[m[32m  ]);[m
+[32m+[m
+[32m+[m[32m  rows.push([Markup.button.callback('🔄 Обновить список', 'user:list')]);[m
+[32m+[m
+[32m+[m[32m  return Markup.inlineKeyboard(rows);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildAdminPanelText() {[m
+[32m+[m[32m  const stats = getStats();[m
+[32m+[m
+[32m+[m[32m  return [[m
+[32m+[m[32m    '<b>Панель управления</b>',[m
+[32m+[m[32m    '',[m
+[32m+[m[32m    `Всего заказов: <b>${stats.total}</b>`,[m
+[32m+[m[32m    `Активных: <b>${stats.active}</b>`,[m
+[32m+[m[32m    `Новых: <b>${stats.pending}</b>`,[m
+[32m+[m[32m    `С ценой: <b>${stats.priced}</b>`,[m
+[32m+[m[32m    `В работе: <b>${stats.inProgress}</b>`,[m
+[32m+[m[32m    `Готовых: <b>${stats.done}</b>`,[m
+[32m+[m[32m    `Отклонённых: <b>${stats.rejected}</b>`,[m
+[32m+[m[32m    `Отменённых: <b>${stats.cancelled}</b>`,[m
+[32m+[m[32m    `Выручка: <b>${escapeHtml(formatMoney(stats.revenue))}</b>`[m
+[32m+[m[32m  ].join('\n');[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildAttentionOrdersText() {[m
+[32m+[m[32m  const orders = getAttentionOrders();[m
+[32m+[m
+[32m+[m[32m  if (!orders.length) {[m
+[32m+[m[32m    return '<b>Список актуальных заказов</b>\n\nСейчас нет незавершённых или невыданных заказов.';[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return [[m
+[32m+[m[32m    '<b>Список актуальных заказов</b>',[m
+[32m+[m[32m    '',[m
+[32m+[m[32m    ...orders.map((order) => {[m
+[32m+[m[32m      const price = order.finalPrice || order.estimatedPrice;[m
+[32m+[m[32m      return `• <b>${order.id}</b> — ${escapeHtml(getStageLabel(order.stage))} — ${escapeHtml(order.clientName)} — ${escapeHtml(formatMoney(price))}`;[m
+[32m+[m[32m    })[m
+[32m+[m[32m  ].join('\n');[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildAdminPanelKeyboard() {[m
+[32m+[m[32m  const activeOrders = getActiveOrders().slice(0, 8);[m
+[32m+[m[32m  const rows = [[m
+[32m+[m[32m    [[m
+[32m+[m[32m      Markup.button.callback('📋 Актуальные заказы', 'admin:attention'),[m
+[32m+[m[32m      Markup.button.callback('🔄 Обновить панель', 'admin:panel')[m
+[32m+[m[32m    ],[m
+[32m+[m[32m    [Markup.button.callback('🧹 Сбросить статистику', 'admin:reset')][m
+[32m+[m[32m  ];[m
+[32m+[m
+[32m+[m[32m  activeOrders.forEach((order) => {[m
+[32m+[m[32m    rows.push([Markup.button.callback(`${order.id} • ${getStageLabel(order.stage).replace(/^[^\s]+\s/, '')}`, `admin:details:${order.id}`)]);[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m[32m  return Markup.inlineKeyboard(rows);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildAttentionOrdersKeyboard(orders) {[m
+[32m+[m[32m  const rows = orders.slice(0, 12).map((order) => [[m
+[32m+[m[32m    Markup.button.callback(`${order.id} • ${getStageLabel(order.stage).replace(/^[^\s]+\s/, '')}`, `admin:details:${order.id}`)[m
+[32m+[m[32m  ]);[m
+[32m+[m
+[32m+[m[32m  rows.push([Markup.button.callback('🔄 Обновить список', 'admin:attention')]);[m
+[32m+[m[32m  rows.push([Markup.button.callback('↩️ В панель', 'admin:panel')]);[m
+[32m+[m
+[32m+[m[32m  return Markup.inlineKeyboard(rows);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction buildResetStatsKeyboard() {[m
+[32m+[m[32m  return Markup.inlineKeyboard([[m
+[32m+[m[32m    [Markup.button.callback('⚠️ Да, сбросить всё', 'admin:reset:confirm')],[m
+[32m+[m[32m    [Markup.button.callback('↩️ Отмена', 'admin:panel')][m
+[32m+[m[32m  ]);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction createDraft(user) {[m
+[32m+[m[32m  return {[m
+[32m+[m[32m    task: '',[m
+[32m+[m[32m    deadline: '',[m
+[32m+[m[32m    requirements: '',[m
+[32m+[m[32m    level: '',[m
+[32m+[m[32m    attachments: [],[m
+[32m+[m[32m    clientId: user.id,[m
+[32m+[m[32m    clientName: getUserName(user),[m
+[32m+[m[32m    clientUsername: getUserUsername(user)[m
+[32m+[m[32m  };[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction resetSession(ctx) {[m
+[32m+[m[32m  ctx.session = {};[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction createOrderFromDraft(draft) {[m
+[32m+[m[32m  const id = createOrderId(state.seq);[m
+[32m+[m[32m  state.seq += 1;[m
+[32m+[m
+[32m+[m[32m  const order = {[m
+[32m+[m[32m    id,[m
+[32m+[m[32m    clientId: draft.clientId,[m
+[32m+[m[32m    clientName: draft.clientName,[m
+[32m+[m[32m    clientUsername: draft.clientUsername || '',[m
+[32m+[m[32m    task: draft.task,[m
+[32m+[m[32m    deadline: draft.deadline,[m
+[32m+[m[32m    requirements: draft.requirements || 'Без дополнительных требований',[m
+[32m+[m[32m    level: draft.level,[m
+[32m+[m[32m    attachments: draft.attachments || [],[m
+[32m+[m[32m    estimatedPrice: getEstimatedPrice(draft),[m
+[32m+[m[32m    finalPrice: null,[m
+[32m+[m[32m    stage: 'pending_review',[m
+[32m+[m[32m    createdAt: new Date().toISOString(),[m
+[32m+[m[32m    updatedAt: new Date().toISOString()[m
+[32m+[m[32m  };[m
+[32m+[m
+[32m+[m[32m  state.orders[id] = order;[m
+[32m+[m[32m  persistState();[m
+[32m+[m
+[32m+[m[32m  return order;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction updateOrder(orderId, patch) {[m
+[32m+[m[32m  const order = state.orders[orderId];[m
+[32m+[m
+[32m+[m[32m  if (!order) {[m
+[32m+[m[32m    return null;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  state.orders[orderId] = {[m
+[32m+[m[32m    ...order,[m
+[32m+[m[32m    ...patch,[m
+[32m+[m[32m    updatedAt: new Date().toISOString()[m
+[32m+[m[32m  };[m
+[32m+[m[32m  persistState();[m
+[32m+[m
+[32m+[m[32m  return state.orders[orderId];[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction parsePrice(value) {[m
+[32m+[m[32m  const normalized = value.replace(',', '.').trim();[m
+[32m+[m
+[32m+[m[32m  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {[m
+[32m+[m[32m    return null;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const price = Math.round(Number(normalized) * 100) / 100;[m
+[32m+[m
+[32m+[m[32m  if (!Number.isFinite(price) || price < MIN_PRICE_BYN || price > MAX_PRICE_BYN) {[m
+[32m+[m[32m    return null;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  return price;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function sendHtml(ctx, text, extra = {}) {[m
+[32m+[m[32m  return ctx.reply(text, { parse_mode: 'HTML', ...extra });[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function deleteMessageSafe(ctx, messageId) {[m
+[32m+[m[32m  if (!ctx.chat?.id || !messageId) {[m
+[32m+[m[32m    return;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    await ctx.telegram.deleteMessage(ctx.chat.id, messageId);[m
+[32m+[m[32m  } catch {}[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function deleteCurrentUserMessage(ctx) {[m
+[32m+[m[32m  const messageId = ctx.message?.message_id;[m
+[32m+[m
+[32m+[m[32m  if (!messageId) {[m
+[32m+[m[32m    return;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  try {[m
+[32m+[m[32m    await ctx.deleteMessage(messageId);[m
+[32m+[m[32m  } catch {}[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function clearFlowMessage(ctx) {[m
+[32m+[m[32m  const messageId = ctx.session?.flowMessageId;[m
+[32m+[m
+[32m+[m[32m  if (!messageId) {[m
+[32m+[m[32m    return;[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  await deleteMessageSafe(ctx, messageId);[m
+[32m+[m[32m  delete ctx.session.flowMessageId;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function showFlowMessage(ctx, text, extra = {}) {[m
+[32m+[m[32m  const messageId = ctx.session?.flowMessageId;[m
+[32m+[m[32m  const options = { parse_mode: 'HTML', ...extra };[m
+[32m+[m
+[32m+[m[32m  if (messageId && ctx.chat?.id) {[m
+[32m+[m[32m    try {[m
+[32m+[m[32m      await ctx.telegram.editMessageText(ctx.chat.id, messageId, undefined, text, options);[m
+[32m+[m[32m      return { message_id: messageId };[m
+[32m+[m[32m    } catch {[m
+[32m+[m[32m      await deleteMessageSafe(ctx, messageId);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m
+[32m+[m[32m  const message = await ctx.reply(text, options);[m
+[32m+[m[32m  ctx.session.flowMessageId = message.message_id;[m
+[32m+[m
+[32m+[m[32m  return message;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function showWelcome(ctx) {[m
+[32m+[m[32m  await clearFlowMessage(ctx);[m
+[32m+[m[32m  resetSession(ctx);[m
+[32m+[m
+[32m+[m[32m  const adminMode = isAdmin(ctx);[m
+[32m+[m[32m  const text = adminMode[m
+[32m+[m[32m    ? '<b>Добро пожаловать в продвинутую админ-панель</b>\n\nУправляй заказами, ценами, статусами и смотри сводку в одном месте.'[m
+[32m+[m[32m    : '<b>Привет!</b>\n\nЯ собираю заказ в удобную карточку, считаю предварительную цену, принимаю файлы и показываю статус без лишних сообщений.';[m
+[32m+[m
+[32m+[m[32m  return sendHtml(ctx, text, getMainKeyboard(adminMode));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function showHelp(ctx) {[m
+[32m+[m[32m  return sendHtml([m
+[32m+[m[32m    ctx,[m
+[32m+[m[32m    [[m
+[32m+[m[32m      '<b>Как это работает</b>',[m
+[32m+[m[32m      '',[m
+[32m+[m[32m      '1. Нажми <b>✨ Новый заказ</b> и кратко опиши задачу.',[m
+[32m+[m[32m      '2. Выбери срок и уровень проработки.',[m
+[32m+[m[32m      '3. При необходимости добавь требования и файлы.',[m
+[32m+[m[32m      '4. Получи оценку, а затем отслеживай статус в разделе <b>📦 Мои заказы</b>.'[m
+[32m+[m[32m    ].join('\n')[m
+[32m+[m[32m  );[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function startDraft(ctx) {[m
+[32m+[m[32m  await clearFlowMessage(ctx);[m
+[32m+[m[32m  ctx.session.flow = 'create_order';[m
+[32m+[m[32m  ctx.session.step = 'task';[m
+[32m+[m[32m  ctx.session.draft = createDraft(ctx.from);[m
+[32m+[m[32m  delete ctx.session.adminAction;[m
+[32m+[m
+[32m+[m[32m  return showFlowMessage([m
+[32m+[m[32m    ctx,[m
+[32m+[m[32m    '<b>Новый заказ</b>\n\nОпиши задачу одним сообщением. Чем конкретнее описание, тем точнее оценка.'[m
+[32m+[m[32m  );[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function askDeadline(ctx) {[m
+[32m+[m[32m  return showFlowMessage([m
+[32m+[m[32m    ctx,[m
+[32m+[m[32m    '<b>Выбери срок</b>\n\nСрочные задачи оцениваются выше, спокойные сроки дают лучший тариф.',[m
+[32m+[m[32m    Markup.inlineKeyboard([[m
+[32m+[m[32m      [Markup.button.callback('Срочно', 'draft:deadline:urgent'), Markup.button.callback('Сегодня', 'draft:deadline:today')],[m
+[32m+[m[32m      [Markup.button.callback('Завтра', 'draft:deadline:tomorrow'), Markup.button.callback('Без спешки', 'draft:deadline:week')][m
+[32m+[m[32m    ])[m
+[32m+[m[32m  );[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function askRequirementsChoice(ctx) {[m
+[32m+[m[32m  return showFlowMessage([m
+[32m+[m[32m    ctx,[m
+[32m+[m[32m    '<b>Есть дополнительные требования?</b>\n\nМожно приложить структуру, критерии, пример оформления или любые детали.',[m
+[32m+[m[32m    Markup.inlineKeyboard([[m
+[32m+[m[32m      [Markup.button.callback('Да, отправлю текст', 'draft:req:text')],[m
+[32m+[m[32m      [Markup.button.callback('Нет, пропустить', 'draft:req:skip')][m
+[32m+[m[32m    ])[m
+[32m+[m[32m  );[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function askLevel(ctx) {[m
+[32m+[m[32m  return showFlowMessage([m
+[32m+[m[32m    ctx,[m
+[32m+[m[32m    '<b>Выбери уровень проработки</b>',[m
+[32m+[m[32m    Markup.inlineKeyboard([[m
+[32m+[m[32m      [Markup.button.callback('Стандарт', 'draft:level:basic')],[m
+[32m+[m[32m      [Markup.button.callback('Усиленный', 'draft:level:strong')],[m
+[32m+[m[32m      [Markup.button.callback('Максимум', 'draft:level:premium')][m
+[32m+[m[32m    ])[m
+[32m+[m[32m  );[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function showDraftSummary(ctx) {[m
+[32m+[m[32m  const draft = ctx.session.draft;[m
+[32m+[m[32m  const summary = [[m
+[32m+[m[32m    '<b>Карточка заказа</b>',[m
+[32m+[m[32m    '',[m
+[32m+[m[32m    `<b>Задача:</b> ${escapeHtml(draft.task)}`,[m
+[32m+[m[32m    `<b>Срок:</b> ${escapeHtml(getDeadlineLabel(draft.deadline))}`,[m
+[32m+[m[32m    `<b>Пакет:</b> ${escapeHtml(getLevelLabel(draft.level))}`,[m
+[32m+[m[32m    `<b>Требования:</b> ${escapeHtml(draft.requirements || 'Без дополнительных требований')}`,[m
+[32m+[m[32m    `<b>Вложения:</b> ${draft.attachments.length}`,[m
+[32m+[m[32m    `<b>Оценка:</b> ${escapeHtml(formatMoney(getEstimatedPrice(draft)))}`[m
+[32m+[m[32m  ].join('\n');[m
+[32m+[m
+[32m+[m[32m  return showFlowMessage(ctx, summary, getDraftSummaryKeyboard());[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function showOrdersForUser(ctx) {[m
+[32m+[m[32m  const orders = getOrdersByUser(ctx.from.id);[m
+[32m+[m[32m  const text = buildUserOrdersText(orders);[m
+[32m+[m[32m  const extra = orders.length ? buildUserOrdersKeyboard(orders) : {};[m
+[32m+[m
+[32m+[m[32m  return sendHtml(ctx, text, extra);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function showOrderDetailsToUser(ctx, order) {[m
+[32m+[m[32m  return sendHtml(ctx, buildOrderSummary(order), getUserOrderControls(order));[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function showAdminPanel(ctx) {[m
+[32m+[m[32m  return sendHtml(ctx, buildAdminPanelText(), buildAdminPanelKeyboard());[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function showAttentionOrders(ctx) {[m
+[32m+[m[32m  const orders = getAttentionOrders();[m
+[32m+[m[32m  const extra = orders.length ? buildAttentionOrdersKeyboard(orders) : buildAdminPanelKeyboard();[m
+[32m+[m
+[32m+[m[32m  return sendHtml(ctx, buildAttentionOrdersText(), extra);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function showOrderDetailsToAdmin(ctx, order) {[m
+[32m+[m[32m  return sendHtml([m
+[32m+[m[32m    ctx,[m
+[32m+[m[32m    buildOrderSummary(order, { includeClient: true, title: `Заказ ${order.id}` }),[m
+[32m+[m[32m    getAdminOrderControls(order)[m
+[32m+[m[32m  );[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function notifyAdminAboutOrder(bot, order) {[m
+[32m+[m[32m  await bot.telegram.sendMessage([m
+[32m+[m[32m    ADMIN_ID,[m
+[32m+[m[32m    buildOrderSummary(order, { includeClient: true, title: `Новый заказ ${order.id}` }),[m
+[32m+[m[32m    { parse_mode: 'HTML', ...getAdminOrderControls(order) }[m
+[32m+[m[32m  );[m
+[32m+[m
+[32m+[m[32m  for (const attachment of order.attachments) {[m
+[32m+[m[32m    if (attachment.type === 'photo') {[m
+[32m+[m[32m      await bot.telegram.sendPhoto(ADMIN_ID, attachment.fileId, {[m
+[32m+[m[32m        caption: `Вложение к ${order.id}`[m
+[32m+[m[32m      });[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (attachment.type === 'document') {[m
+[32m+[m[32m      await bot.telegram.sendDocument(ADMIN_ID, attachment.fileId, {[m
+[32m+[m[32m        caption: `Вложение к ${order.id}`[m
+[32m+[m[32m      });[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function notifyUserAboutStage(bot, order, title, extraLines = []) {[m
+[32m+[m[32m  const lines = [[m
+[32m+[m[32m    `<b>${escapeHtml(title)}</b>`,[m
+[32m+[m[32m    '',[m
+[32m+[m[32m    buildOrderSummary(order),[m
+[32m+[m[32m    ...extraLines[m
+[32m+[m[32m  ];[m
+[32m+[m
+[32m+[m[32m  await bot.telegram.sendMessage(order.clientId, lines.join('\n'), {[m
+[32m+[m[32m    parse_mode: 'HTML',[m
+[32m+[m[32m    ...getUserOrderControls(order)[m
+[32m+[m[32m  });[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function submitDraft(bot, ctx) {[m
+[32m+[m[32m  const draft = ctx.session.draft;[m
+[32m+[m[32m  const order = createOrderFromDraft(draft);[m
+[32m+[m[32m  await clearFlowMessage(ctx);[m
+[32m+[m[32m  resetSession(ctx);[m
+[32m+[m
+[32m+[m[32m  await notifyAdminAboutOrder(bot, order);[m
+[32m+[m
+[32m+[m[32m  return sendHtml([m
+[32m+[m[32m    ctx,[m
+[32m+[m[32m    [[m
+[32m+[m[32m      '<b>Заказ отправлен</b>',[m
+[32m+[m[32m      '',[m
+[32m+[m[32m      `Номер: <b>${order.id}</b>`,[m
+[32m+[m[32m      `Предварительная оценка: <b>${escapeHtml(formatMoney(order.estimatedPrice))}</b>`,[m
+[32m+[m[32m      'Статус уже доступен в разделе <b>📦 Мои заказы</b>.'[m
+[32m+[m[32m    ].join('\n'),[m
+[32m+[m[32m    getMainKeyboard(isAdmin(ctx))[m
+[32m+[m[32m  );[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction createBot() {[m
+[32m+[m[32m  ensureEnv();[m
+[32m+[m
+[32m+[m[32m  const bot = new Telegraf(BOT_TOKEN);[m
+[32m+[m[32m  bot.use(session());[m
+[32m+[m[32m  bot.use((ctx, next) => {[m
+[32m+[m[32m    if (!ctx.session) {[m
+[32m+[m[32m      ctx.session = {};[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    return next();[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m[32m  bot.start(showWelcome);[m
+[32m+[m[32m  bot.hears('🏠 Главное меню', showWelcome);[m
+[32m+[m[32m  bot.hears('ℹ️ Как это работает', showHelp);[m
+[32m+[m[32m  bot.hears('✨ Новый заказ', startDraft);[m
+[32m+[m[32m  bot.hears('📦 Мои заказы', showOrdersForUser);[m
+[32m+[m[32m  bot.hears('❌ Сбросить', async (ctx) => {[m
+[32m+[m[32m    await clearFlowMessage(ctx);[m
+[32m+[m[32m    resetSession(ctx);[m
+[32m+[m[32m    return sendHtml(ctx, 'Текущее действие сброшено. Можно начать заново.', getMainKeyboard(isAdmin(ctx)));[m
+[32m+[m[32m  });[m
+[32m+[m[32m  bot.hears('🛠 Админ-панель', async (ctx) => {[m
+[32m+[m[32m    if (!isAdmin(ctx)) {[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    return showAdminPanel(ctx);[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m[32m  bot.on('text', async (ctx) => {[m
+[32m+[m[32m    const text = ctx.message.text.trim();[m
+[32m+[m
+[32m+[m[32m    if (isAdmin(ctx) && ctx.session.adminAction?.type === 'set_price') {[m
+[32m+[m[32m      const price = parsePrice(text);[m
+[32m+[m
+[32m+[m[32m      if (!price) {[m
+[32m+[m[32m        return sendHtml(ctx, `Введите цену в диапазоне от <b>${MIN_PRICE_BYN}</b> до <b>${MAX_PRICE_BYN}</b> BYN, например <b>9.5</b>.`);[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      const order = updateOrder(ctx.session.adminAction.orderId, {[m
+[32m+[m[32m        stage: 'priced',[m
+[32m+[m[32m        finalPrice: price[m
+[32m+[m[32m      });[m
+[32m+[m
+[32m+[m[32m      if (!order) {[m
+[32m+[m[32m        resetSession(ctx);[m
+[32m+[m[32m        return sendHtml(ctx, 'Заказ уже недоступен.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      delete ctx.session.adminAction;[m
+[32m+[m
+[32m+[m[32m      await notifyUserAboutStage([m
+[32m+[m[32m        bot,[m
+[32m+[m[32m        order,[m
+[32m+[m[32m        'Цена по заказу назначена',[m
+[32m+[m[32m        ['\nАдминистратор подтвердил заказ и назначил цену.'][m
+[32m+[m[32m      );[m
+[32m+[m
+[32m+[m[32m      return sendHtml([m
+[32m+[m[32m        ctx,[m
+[32m+[m[32m        `Цена для <b>${order.id}</b> сохранена: <b>${escapeHtml(formatMoney(price))}</b>.`,[m
+[32m+[m[32m        getAdminOrderControls(order)[m
+[32m+[m[32m      );[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (ctx.session.flow !== 'create_order') {[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (ctx.session.step === 'task') {[m
+[32m+[m[32m      await deleteCurrentUserMessage(ctx);[m
+[32m+[m
+[32m+[m[32m      if (text.length < 10) {[m
+[32m+[m[32m        return showFlowMessage(ctx, 'Опиши задачу чуть подробнее, минимум 10 символов.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      ctx.session.draft.task = text;[m
+[32m+[m[32m      ctx.session.step = 'deadline';[m
+[32m+[m
+[32m+[m[32m      return askDeadline(ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (ctx.session.step === 'requirements') {[m
+[32m+[m[32m      await deleteCurrentUserMessage(ctx);[m
+[32m+[m
+[32m+[m[32m      if (text.length < 4) {[m
+[32m+[m[32m        return showFlowMessage(ctx, 'Добавь больше деталей, чтобы требования было полезно учесть.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      ctx.session.draft.requirements = text;[m
+[32m+[m[32m      ctx.session.step = 'level';[m
+[32m+[m
+[32m+[m[32m      return askLevel(ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (ctx.session.step === 'attachments') {[m
+[32m+[m[32m      await deleteCurrentUserMessage(ctx);[m
+[32m+[m
+[32m+[m[32m      return showFlowMessage([m
+[32m+[m[32m        ctx,[m
+[32m+[m[32m        'Сейчас можно отправлять только фото или документы. Когда закончишь, нажми <b>🚀 Отправить заказ</b> под сообщением.',[m
+[32m+[m[32m        getAttachmentControls()[m
+[32m+[m[32m      );[m
+[32m+[m[32m    }[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m[32m  bot.on('document', async (ctx) => {[m
+[32m+[m[32m    if (ctx.session.flow !== 'create_order' || ctx.session.step !== 'attachments') {[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    ctx.session.draft.attachments.push({[m
+[32m+[m[32m      type: 'document',[m
+[32m+[m[32m      fileId: ctx.message.document.file_id,[m
+[32m+[m[32m      fileName: ctx.message.document.file_name || 'Документ'[m
+[32m+[m[32m    });[m
+[32m+[m
+[32m+[m[32m    await deleteCurrentUserMessage(ctx);[m
+[32m+[m
+[32m+[m[32m    return showFlowMessage([m
+[32m+[m[32m      ctx,[m
+[32m+[m[32m      `Документ добавлен. Вложений в заказе: <b>${ctx.session.draft.attachments.length}</b>.`,[m
+[32m+[m[32m      getAttachmentControls()[m
+[32m+[m[32m    );[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m[32m  bot.on('photo', async (ctx) => {[m
+[32m+[m[32m    if (ctx.session.flow !== 'create_order' || ctx.session.step !== 'attachments') {[m
+[32m+[m[32m      return;[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    const photo = ctx.message.photo[ctx.message.photo.length - 1];[m
+[32m+[m
+[32m+[m[32m    ctx.session.draft.attachments.push({[m
+[32m+[m[32m      type: 'photo',[m
+[32m+[m[32m      fileId: photo.file_id[m
+[32m+[m[32m    });[m
+[32m+[m
+[32m+[m[32m    await deleteCurrentUserMessage(ctx);[m
+[32m+[m
+[32m+[m[32m    return showFlowMessage([m
+[32m+[m[32m      ctx,[m
+[32m+[m[32m      `Фото добавлено. Вложений в заказе: <b>${ctx.session.draft.attachments.length}</b>.`,[m
+[32m+[m[32m      getAttachmentControls()[m
+[32m+[m[32m    );[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m[32m  bot.on('callback_query', async (ctx) => {[m
+[32m+[m[32m    const data = ctx.callbackQuery.data || '';[m
+[32m+[m[32m    await ctx.answerCbQuery();[m
+[32m+[m
+[32m+[m[32m    if (data === 'draft:attachments') {[m
+[32m+[m[32m      if (ctx.session.flow !== 'create_order') {[m
+[32m+[m[32m        return sendHtml(ctx, 'Сначала начни новый заказ через <b>✨ Новый заказ</b>.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      ctx.session.step = 'attachments';[m
+[32m+[m
+[32m+[m[32m      return showFlowMessage([m
+[32m+[m[32m        ctx,[m
+[32m+[m[32m        'Отправь документы или фото одним или несколькими сообщениями. Когда всё будет готово, нажми кнопку ниже.',[m
+[32m+[m[32m        getAttachmentControls()[m
+[32m+[m[32m      );[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data === 'draft:summary') {[m
+[32m+[m[32m      if (ctx.session.flow !== 'create_order') {[m
+[32m+[m[32m        return sendHtml(ctx, 'Черновик уже сброшен.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      ctx.session.step = 'summary';[m
+[32m+[m[32m      return showDraftSummary(ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data === 'draft:submit') {[m
+[32m+[m[32m      if (ctx.session.flow !== 'create_order' || !ctx.session.draft?.task || !ctx.session.draft?.deadline || !ctx.session.draft?.level) {[m
+[32m+[m[32m        return showFlowMessage(ctx, 'Черновик ещё не заполнен полностью.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      return submitDraft(bot, ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data === 'draft:restart') {[m
+[32m+[m[32m      return startDraft(ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data.startsWith('draft:deadline:')) {[m
+[32m+[m[32m      if (ctx.session.flow !== 'create_order') {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      ctx.session.draft.deadline = data.split(':')[2];[m
+[32m+[m[32m      ctx.session.step = 'requirements_choice';[m
+[32m+[m
+[32m+[m[32m      return askRequirementsChoice(ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data === 'draft:req:skip') {[m
+[32m+[m[32m      if (ctx.session.flow !== 'create_order') {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      ctx.session.draft.requirements = 'Без дополнительных требований';[m
+[32m+[m[32m      ctx.session.step = 'level';[m
+[32m+[m
+[32m+[m[32m      return askLevel(ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data === 'draft:req:text') {[m
+[32m+[m[32m      if (ctx.session.flow !== 'create_order') {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      ctx.session.step = 'requirements';[m
+[32m+[m
+[32m+[m[32m      return showFlowMessage(ctx, 'Отправь требования одним сообщением. Я добавлю их в карточку заказа.');[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data.startsWith('draft:level:')) {[m
+[32m+[m[32m      if (ctx.session.flow !== 'create_order') {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      ctx.session.draft.level = data.split(':')[2];[m
+[32m+[m[32m      ctx.session.step = 'summary';[m
+[32m+[m
+[32m+[m[32m      return showDraftSummary(ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data === 'user:list') {[m
+[32m+[m[32m      return showOrdersForUser(ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data.startsWith('user:details:')) {[m
+[32m+[m[32m      const order = state.orders[data.split(':')[2]];[m
+[32m+[m
+[32m+[m[32m      if (!order || order.clientId !== ctx.from.id) {[m
+[32m+[m[32m        return sendHtml(ctx, 'Заказ не найден.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      return showOrderDetailsToUser(ctx, order);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data.startsWith('user:cancel:')) {[m
+[32m+[m[32m      const orderId = data.split(':')[2];[m
+[32m+[m[32m      const order = state.orders[orderId];[m
+[32m+[m
+[32m+[m[32m      if (!order || order.clientId !== ctx.from.id) {[m
+[32m+[m[32m        return sendHtml(ctx, 'Заказ не найден.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      if (!['pending_review', 'priced', 'in_progress'].includes(order.stage)) {[m
+[32m+[m[32m        return sendHtml(ctx, 'Этот заказ уже нельзя отменить.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      const cancelledOrder = updateOrder(orderId, { stage: 'cancelled' });[m
+[32m+[m
+[32m+[m[32m      await bot.telegram.sendMessage([m
+[32m+[m[32m        ADMIN_ID,[m
+[32m+[m[32m        `<b>Клиент отменил заказ ${cancelledOrder.id}</b>\n\n${buildOrderSummary(cancelledOrder, { includeClient: true })}`,[m
+[32m+[m[32m        { parse_mode: 'HTML' }[m
+[32m+[m[32m      );[m
+[32m+[m
+[32m+[m[32m      return sendHtml(ctx, 'Заказ отменён.', getMainKeyboard(isAdmin(ctx)));[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data === 'admin:panel') {[m
+[32m+[m[32m      if (!isAdmin(ctx)) {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      return showAdminPanel(ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data === 'admin:attention') {[m
+[32m+[m[32m      if (!isAdmin(ctx)) {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      return showAttentionOrders(ctx);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data === 'admin:reset') {[m
+[32m+[m[32m      if (!isAdmin(ctx)) {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      return sendHtml([m
+[32m+[m[32m        ctx,[m
+[32m+[m[32m        '<b>Сброс статистики</b>\n\nЭто удалит все заказы, обнулит статистику и вернёт нумерацию заказов к началу.',[m
+[32m+[m[32m        buildResetStatsKeyboard()[m
+[32m+[m[32m      );[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data === 'admin:reset:confirm') {[m
+[32m+[m[32m      if (!isAdmin(ctx)) {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      state.orders = {};[m
+[32m+[m[32m      state.seq = 1;[m
+[32m+[m[32m      persistState();[m
+[32m+[m[32m      resetSession(ctx);[m
+[32m+[m
+[32m+[m[32m      return sendHtml(ctx, 'Вся статистика и номера заказов сброшены.', buildAdminPanelKeyboard());[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data.startsWith('admin:details:')) {[m
+[32m+[m[32m      if (!isAdmin(ctx)) {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      const order = state.orders[data.split(':')[2]];[m
+[32m+[m
+[32m+[m[32m      if (!order) {[m
+[32m+[m[32m        return sendHtml(ctx, 'Заказ не найден.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      return showOrderDetailsToAdmin(ctx, order);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data.startsWith('admin:price:')) {[m
+[32m+[m[32m      if (!isAdmin(ctx)) {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      const order = state.orders[data.split(':')[2]];[m
+[32m+[m
+[32m+[m[32m      if (!order) {[m
+[32m+[m[32m        return sendHtml(ctx, 'Заказ не найден.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      ctx.session.adminAction = {[m
+[32m+[m[32m        type: 'set_price',[m
+[32m+[m[32m        orderId: order.id[m
+[32m+[m[32m      };[m
+[32m+[m
+[32m+[m[32m      return sendHtml([m
+[32m+[m[32m        ctx,[m
+[32m+[m[32m        `Введи цену для <b>${order.id}</b> одним сообщением в белорусских рублях от <b>${MIN_PRICE_BYN}</b> до <b>${MAX_PRICE_BYN}</b> BYN, например <b>${order.estimatedPrice}</b>.`[m
+[32m+[m[32m      );[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data.startsWith('admin:reject:')) {[m
+[32m+[m[32m      if (!isAdmin(ctx)) {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      const orderId = data.split(':')[2];[m
+[32m+[m[32m      const order = updateOrder(orderId, { stage: 'rejected' });[m
+[32m+[m
+[32m+[m[32m      if (!order) {[m
+[32m+[m[32m        return sendHtml(ctx, 'Заказ не найден.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      await notifyUserAboutStage(bot, order, 'Заказ отклонён');[m
+[32m+[m
+[32m+[m[32m      return sendHtml(ctx, `Заказ <b>${order.id}</b> отклонён.`);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data.startsWith('admin:start:')) {[m
+[32m+[m[32m      if (!isAdmin(ctx)) {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      const orderId = data.split(':')[2];[m
+[32m+[m[32m      const order = updateOrder(orderId, { stage: 'in_progress' });[m
+[32m+[m
+[32m+[m[32m      if (!order) {[m
+[32m+[m[32m        return sendHtml(ctx, 'Заказ не найден.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      await notifyUserAboutStage(bot, order, 'Заказ взят в работу');[m
+[32m+[m
+[32m+[m[32m      return showOrderDetailsToAdmin(ctx, order);[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    if (data.startsWith('admin:done:')) {[m
+[32m+[m[32m      if (!isAdmin(ctx)) {[m
+[32m+[m[32m        return;[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      const orderId = data.split(':')[2];[m
+[32m+[m[32m      const order = updateOrder(orderId, { stage: 'done' });[m
+[32m+[m
+[32m+[m[32m      if (!order) {[m
+[32m+[m[32m        return sendHtml(ctx, 'Заказ не найден.');[m
+[32m+[m[32m      }[m
+[32m+[m
+[32m+[m[32m      await notifyUserAboutStage(bot, order, 'Заказ завершён');[m
+[32m+[m
+[32m+[m[32m      return showOrderDetailsToAdmin(ctx, order);[m
+[32m+[m[32m    }[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m[32m  bot.catch(async (error, ctx) => {[m
+[32m+[m[32m    console.error('Bot error:', error);[m
+[32m+[m
+[32m+[m[32m    if (ctx?.reply) {[m
+[32m+[m[32m      await sendHtml(ctx, 'Произошла ошибка. Попробуй повторить действие ещё раз.');[m
+[32m+[m[32m    }[m
+[32m+[m[32m  });[m
+[32m+[m
+[32m+[m[32m  return bot;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32masync function startBot() {[m
+[32m+[m[32m  const bot = createBot();[m
+[32m+[m[32m  await bot.launch();[m
+[32m+[m[32m  console.log('🚀 Бот работает в усиленном режиме');[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mif (require.main === module) {[m
+[32m+[m[32m  startBot().catch((error) => {[m
+[32m+[m[32m    console.error(`❌ ${error.message}`);[m
+[32m+[m[32m    process.exit(1);[m
+[32m+[m[32m  });[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mmodule.exports = {[m
+[32m+[m[32m  DEADLINES,[m
+[32m+[m[32m  LEVELS,[m
+[32m+[m[32m  STAGES,[m
+[32m+[m[32m  createOrderId,[m
+[32m+[m[32m  getEstimatedPrice,[m
+[32m+[m[32m  getStageLabel,[m
+[32m+[m[32m  parsePrice,[m
+[32m+[m[32m  createBot[m
+[32m+[m[32m};[m
+[1mdiff --git a/package-lock.json b/package-lock.json[m
+[1mnew file mode 100644[m
+[1mindex 0000000..353ff57[m
+[1m--- /dev/null[m
+[1m+++ b/package-lock.json[m
+[36m@@ -0,0 +1,203 @@[m
+[32m+[m[32m{[m
+[32m+[m[32m  "name": "chertila_bot",[m
+[32m+[m[32m  "lockfileVersion": 3,[m
+[32m+[m[32m  "requires": true,[m
+[32m+[m[32m  "packages": {[m
+[32m+[m[32m    "": {[m
+[32m+[m[32m      "dependencies": {[m
+[32m+[m[32m        "dotenv": "^17.4.0",[m
+[32m+[m[32m        "node.js": "^0.0.1-security",[m
+[32m+[m[32m        "telegraf": "^4.16.3"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/@telegraf/types": {[m
+[32m+[m[32m      "version": "7.1.0",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/@telegraf/types/-/types-7.1.0.tgz",[m
+[32m+[m[32m      "integrity": "sha512-kGevOIbpMcIlCDeorKGpwZmdH7kHbqlk/Yj6dEpJMKEQw5lk0KVQY0OLXaCswy8GqlIVLd5625OB+rAntP9xVw==",[m
+[32m+[m[32m      "license": "MIT"[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/abort-controller": {[m
+[32m+[m[32m      "version": "3.0.0",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/abort-controller/-/abort-controller-3.0.0.tgz",[m
+[32m+[m[32m      "integrity": "sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg==",[m
+[32m+[m[32m      "license": "MIT",[m
+[32m+[m[32m      "dependencies": {[m
+[32m+[m[32m        "event-target-shim": "^5.0.0"[m
+[32m+[m[32m      },[m
+[32m+[m[32m      "engines": {[m
+[32m+[m[32m        "node": ">=6.5"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/buffer-alloc": {[m
+[32m+[m[32m      "version": "1.2.0",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/buffer-alloc/-/buffer-alloc-1.2.0.tgz",[m
+[32m+[m[32m      "integrity": "sha512-CFsHQgjtW1UChdXgbyJGtnm+O/uLQeZdtbDo8mfUgYXCHSM1wgrVxXm6bSyrUuErEb+4sYVGCzASBRot7zyrow==",[m
+[32m+[m[32m      "license": "MIT",[m
+[32m+[m[32m      "dependencies": {[m
+[32m+[m[32m        "buffer-alloc-unsafe": "^1.1.0",[m
+[32m+[m[32m        "buffer-fill": "^1.0.0"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/buffer-alloc-unsafe": {[m
+[32m+[m[32m      "version": "1.1.0",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/buffer-alloc-unsafe/-/buffer-alloc-unsafe-1.1.0.tgz",[m
+[32m+[m[32m      "integrity": "sha512-TEM2iMIEQdJ2yjPJoSIsldnleVaAk1oW3DBVUykyOLsEsFmEc9kn+SFFPz+gl54KQNxlDnAwCXosOS9Okx2xAg==",[m
+[32m+[m[32m      "license": "MIT"[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/buffer-fill": {[m
+[32m+[m[32m      "version": "1.0.0",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/buffer-fill/-/buffer-fill-1.0.0.tgz",[m
+[32m+[m[32m      "integrity": "sha512-T7zexNBwiiaCOGDg9xNX9PBmjrubblRkENuptryuI64URkXDFum9il/JGL8Lm8wYfAXpredVXXZz7eMHilimiQ==",[m
+[32m+[m[32m      "license": "MIT"[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/debug": {[m
+[32m+[m[32m      "version": "4.4.3",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/debug/-/debug-4.4.3.tgz",[m
+[32m+[m[32m      "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",[m
+[32m+[m[32m      "license": "MIT",[m
+[32m+[m[32m      "dependencies": {[m
+[32m+[m[32m        "ms": "^2.1.3"[m
+[32m+[m[32m      },[m
+[32m+[m[32m      "engines": {[m
+[32m+[m[32m        "node": ">=6.0"[m
+[32m+[m[32m      },[m
+[32m+[m[32m      "peerDependenciesMeta": {[m
+[32m+[m[32m        "supports-color": {[m
+[32m+[m[32m          "optional": true[m
+[32m+[m[32m        }[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/dotenv": {[m
+[32m+[m[32m      "version": "17.4.0",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/dotenv/-/dotenv-17.4.0.tgz",[m
+[32m+[m[32m      "integrity": "sha512-kCKF62fwtzwYm0IGBNjRUjtJgMfGapII+FslMHIjMR5KTnwEmBmWLDRSnc3XSNP8bNy34tekgQyDT0hr7pERRQ==",[m
+[32m+[m[32m      "license": "BSD-2-Clause",[m
+[32m+[m[32m      "engines": {[m
+[32m+[m[32m        "node": ">=12"[m
+[32m+[m[32m      },[m
+[32m+[m[32m      "funding": {[m
+[32m+[m[32m        "url": "https://dotenvx.com"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/event-target-shim": {[m
+[32m+[m[32m      "version": "5.0.1",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/event-target-shim/-/event-target-shim-5.0.1.tgz",[m
+[32m+[m[32m      "integrity": "sha512-i/2XbnSz/uxRCU6+NdVJgKWDTM427+MqYbkQzD321DuCQJUqOuJKIA0IM2+W2xtYHdKOmZ4dR6fExsd4SXL+WQ==",[m
+[32m+[m[32m      "license": "MIT",[m
+[32m+[m[32m      "engines": {[m
+[32m+[m[32m        "node": ">=6"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/mri": {[m
+[32m+[m[32m      "version": "1.2.0",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/mri/-/mri-1.2.0.tgz",[m
+[32m+[m[32m      "integrity": "sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==",[m
+[32m+[m[32m      "license": "MIT",[m
+[32m+[m[32m      "engines": {[m
+[32m+[m[32m        "node": ">=4"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/ms": {[m
+[32m+[m[32m      "version": "2.1.3",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/ms/-/ms-2.1.3.tgz",[m
+[32m+[m[32m      "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",[m
+[32m+[m[32m      "license": "MIT"[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/node-fetch": {[m
+[32m+[m[32m      "version": "2.7.0",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/node-fetch/-/node-fetch-2.7.0.tgz",[m
+[32m+[m[32m      "integrity": "sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A==",[m
+[32m+[m[32m      "license": "MIT",[m
+[32m+[m[32m      "dependencies": {[m
+[32m+[m[32m        "whatwg-url": "^5.0.0"[m
+[32m+[m[32m      },[m
+[32m+[m[32m      "engines": {[m
+[32m+[m[32m        "node": "4.x || >=6.0.0"[m
+[32m+[m[32m      },[m
+[32m+[m[32m      "peerDependencies": {[m
+[32m+[m[32m        "encoding": "^0.1.0"[m
+[32m+[m[32m      },[m
+[32m+[m[32m      "peerDependenciesMeta": {[m
+[32m+[m[32m        "encoding": {[m
+[32m+[m[32m          "optional": true[m
+[32m+[m[32m        }[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/node.js": {[m
+[32m+[m[32m      "version": "0.0.1-security",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/node.js/-/node.js-0.0.1-security.tgz",[m
+[32m+[m[32m      "integrity": "sha512-8tWQiyg/3ggdLTrtfgj/NxmZpC20eB1U5VNkqt2dbelpcr3NrfjpEE3DgifpBOCJ4Xu9Obvu8iju63ViQW3Hvg=="[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/p-timeout": {[m
+[32m+[m[32m      "version": "4.1.0",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/p-timeout/-/p-timeout-4.1.0.tgz",[m
+[32m+[m[32m      "integrity": "sha512-+/wmHtzJuWii1sXn3HCuH/FTwGhrp4tmJTxSKJbfS+vkipci6osxXM5mY0jUiRzWKMTgUT8l7HFbeSwZAynqHw==",[m
+[32m+[m[32m      "license": "MIT",[m
+[32m+[m[32m      "engines": {[m
+[32m+[m[32m        "node": ">=10"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/safe-compare": {[m
+[32m+[m[32m      "version": "1.1.4",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/safe-compare/-/safe-compare-1.1.4.tgz",[m
+[32m+[m[32m      "integrity": "sha512-b9wZ986HHCo/HbKrRpBJb2kqXMK9CEWIE1egeEvZsYn69ay3kdfl9nG3RyOcR+jInTDf7a86WQ1d4VJX7goSSQ==",[m
+[32m+[m[32m      "license": "MIT",[m
+[32m+[m[32m      "dependencies": {[m
+[32m+[m[32m        "buffer-alloc": "^1.2.0"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/sandwich-stream": {[m
+[32m+[m[32m      "version": "2.0.2",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/sandwich-stream/-/sandwich-stream-2.0.2.tgz",[m
+[32m+[m[32m      "integrity": "sha512-jLYV0DORrzY3xaz/S9ydJL6Iz7essZeAfnAavsJ+zsJGZ1MOnsS52yRjU3uF3pJa/lla7+wisp//fxOwOH8SKQ==",[m
+[32m+[m[32m      "license": "Apache-2.0",[m
+[32m+[m[32m      "engines": {[m
+[32m+[m[32m        "node": ">= 0.10"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/telegraf": {[m
+[32m+[m[32m      "version": "4.16.3",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/telegraf/-/telegraf-4.16.3.tgz",[m
+[32m+[m[32m      "integrity": "sha512-yjEu2NwkHlXu0OARWoNhJlIjX09dRktiMQFsM678BAH/PEPVwctzL67+tvXqLCRQQvm3SDtki2saGO9hLlz68w==",[m
+[32m+[m[32m      "license": "MIT",[m
+[32m+[m[32m      "dependencies": {[m
+[32m+[m[32m        "@telegraf/types": "^7.1.0",[m
+[32m+[m[32m        "abort-controller": "^3.0.0",[m
+[32m+[m[32m        "debug": "^4.3.4",[m
+[32m+[m[32m        "mri": "^1.2.0",[m
+[32m+[m[32m        "node-fetch": "^2.7.0",[m
+[32m+[m[32m        "p-timeout": "^4.1.0",[m
+[32m+[m[32m        "safe-compare": "^1.1.4",[m
+[32m+[m[32m        "sandwich-stream": "^2.0.2"[m
+[32m+[m[32m      },[m
+[32m+[m[32m      "bin": {[m
+[32m+[m[32m        "telegraf": "lib/cli.mjs"[m
+[32m+[m[32m      },[m
+[32m+[m[32m      "engines": {[m
+[32m+[m[32m        "node": "^12.20.0 || >=14.13.1"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/tr46": {[m
+[32m+[m[32m      "version": "0.0.3",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/tr46/-/tr46-0.0.3.tgz",[m
+[32m+[m[32m      "integrity": "sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==",[m
+[32m+[m[32m      "license": "MIT"[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/webidl-conversions": {[m
+[32m+[m[32m      "version": "3.0.1",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/webidl-conversions/-/webidl-conversions-3.0.1.tgz",[m
+[32m+[m[32m      "integrity": "sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==",[m
+[32m+[m[32m      "license": "BSD-2-Clause"[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "node_modules/whatwg-url": {[m
+[32m+[m[32m      "version": "5.0.0",[m
+[32m+[m[32m      "resolved": "https://registry.npmjs.org/whatwg-url/-/whatwg-url-5.0.0.tgz",[m
+[32m+[m[32m      "integrity": "sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw==",[m
+[32m+[m[32m      "license": "MIT",[m
+[32m+[m[32m      "dependencies": {[m
+[32m+[m[32m        "tr46": "~0.0.3",[m
+[32m+[m[32m        "webidl-conversions": "^3.0.0"[m
+[32m+[m[32m      }[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[1mdiff --git a/package.json b/package.json[m
+[1mnew file mode 100644[m
+[1mindex 0000000..c38d14f[m
+[1m--- /dev/null[m
+[1m+++ b/package.json[m
+[36m@@ -0,0 +1,11 @@[m
+[32m+[m[32m{[m
+[32m+[m[32m  "scripts": {[m
+[32m+[m[32m    "start": "node bot.js",[m
+[32m+[m[32m    "check": "node --check bot.js"[m
+[32m+[m[32m  },[m
+[32m+[m[32m  "dependencies": {[m
+[32m+[m[32m    "dotenv": "^17.4.0",[m
+[32m+[m[32m    "node.js": "^0.0.1-security",[m
+[32m+[m[32m    "telegraf": "^4.16.3"[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m

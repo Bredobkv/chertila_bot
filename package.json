@@ -1,0 +1,11 @@
+{
+  "scripts": {
+    "start": "node bot.js",
+    "check": "node --check bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.0",
+    "node.js": "^0.0.1-security",
+    "telegraf": "^4.16.3"
+  }
+}

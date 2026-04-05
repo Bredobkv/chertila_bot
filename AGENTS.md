@@ -1,12 +1,12 @@
 # chertila_bot
 
-Telegram order management bot using Telegraf v4.
+Telegram order management bot using Telegraf v4 with SQLite database.
 
 ## Stack
-- Node.js, plain JavaScript (no TypeScript)
+- Node.js, plain JavaScript
 - Telegraf for Telegram Bot API
+- better-sqlite3 for database
 - dotenv for env loading
-- File-based state in `bot-state.json`
 
 ## Commands
 ```bash
@@ -23,44 +23,50 @@ WEB_PORT=3000        # optional, dashboard port
 ```
 
 ## Key Files
-- `bot.js` — single-file bot, all logic, handlers, and state management
-- `dashboard.js` — web dashboard for admin (shows stats and orders table)
-- `bot-state.json` — order data, profiles, and user list (auto-generated)
+- `bot.js` — main bot logic
+- `database.js` — SQLite operations (all data storage)
+- `dashboard.js` — web dashboard for admin
+- `bot.db` — SQLite database file
+- `backups/` — automatic backups directory
 - `.env` — credentials (never commit)
 
-## State Persistence
-State is written to `bot-state.json` after every mutation via `persistState()`. The file contains:
-- `seq` — order ID counter (ORD-0001, ORD-0002, ...)
-- `orders` — map of order objects keyed by ID
-- `profiles` — map of user profiles keyed by userId
-- `users` — array of all user IDs (for broadcast)
+## Database
+SQLite database with tables:
+- `users` — Telegram users
+- `profiles` — user profiles (name, phone, email, notes)
+- `orders` — all orders with stages
+- `attachments` — order attachments
+- `logs` — all operations log
+- `seq` — order ID counter
 
-## Order Flow
-1. User registers with name via profile
-2. User starts order → step through task → deadline → requirements → level
-3. Draft submitted → saves to state → notifies admin
-4. Admin sets price → order enters `priced` stage → notifies user
-5. Admin starts work → `in_progress` → admin completes → `done`
+Auto-backup every 2 days to `backups/` directory.
+
+## Order Stages
+```
+pending_review → awaiting_confirmation → priced → in_progress → done
+                                    ↓
+                               rejected/cancelled
+```
+
+## Order Confirmation Flow
+1. User creates order
+2. Admin sets price
+3. Order goes to `awaiting_confirmation` stage
+4. User receives notification with Confirm/Cancel buttons
+5. User confirms → order moves to `priced` → admin can start work
+
+## Limits
+- Max 3 active orders per user
+- Max 4 orders per day for any deadline
+- Over limit: price x2, user must confirm
 
 ## Registration
-Users must fill in their name in the profile before they can create orders. Without a name, the "Новый заказ" button shows a registration prompt.
+Users must fill name AND phone before creating orders.
 
-## Features
-- **User profiles** — save name, phone, email, notes; auto-fills in orders
-- **User stats** — 📊 shows order history, total spent
-- **Admin search** — search orders by ID, client name, or status
-- **Admin broadcast** — send messages to all users or filtered by order stage
-- **Deadline reminders** — admin gets notified hourly about orders in progress >24h
-- **Web dashboard** — visual stats and order table at http://localhost:3000
+## Admin Features
+- Admin panel with orders, search, broadcast
+- Database management: stats, export, import, clear, optimize, logs
+- Automatic reminders for overdue and unconfirmed orders
 
-## Admin Actions
-Admin is determined by `ADMIN_ID` in `.env`. Only this user sees:
-- Admin panel with search, broadcast, stats
-- All order details
-- Web dashboard
-
-## Development Notes
-- The bot uses Telegraf sessions — ctx.session persists across user interactions
-- Flow messages are edited in-place using `flowMessageId` in session
-- Attachments (photos/documents) are stored as Telegram `file_id` references, not downloaded
-- User tracking happens via middleware; all users who interact are tracked for broadcast
+## Deadline Selection
+Days of week (Mon-Sun) + custom date input (DD.MM.YYYY)

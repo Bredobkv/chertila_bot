@@ -1023,7 +1023,7 @@ function createBot() {
   bot.hears('🧮 Калькулятор', async (ctx) => {
     await clearFlowMessage(ctx);
     ctx.session.flow = 'price_calc';
-    ctx.session.calcDraft = { task: '', deadline: '', level: '' };
+    ctx.session.calcDraft = { task: '', deadline: '', level: '', requirements: '', attachments: [] };
     return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
   });
   bot.hears('❌ Сбросить', async (ctx) => {
@@ -1298,7 +1298,7 @@ function createBot() {
 
     if (data === 'calc:reset') {
       if (ctx.session.flow !== 'price_calc') return;
-      ctx.session.calcDraft = { task: '', deadline: '', level: '' };
+      ctx.session.calcDraft = { task: '', deadline: '', level: '', requirements: '', attachments: [] };
       return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
     }
 

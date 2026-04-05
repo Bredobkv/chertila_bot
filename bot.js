@@ -759,7 +759,10 @@ async function showFlowMessage(ctx, text, extra = {}) {
 
   if (messageId && ctx.chat?.id) {
     try {
-      await ctx.telegram.editMessageText(ctx.chat.id, messageId, undefined, text, options);
+      await ctx.telegram.editMessageText(ctx.chat.id, messageId, undefined, text, { parse_mode: 'HTML' });
+      if (extra.reply_markup) {
+        await ctx.telegram.editMessageReplyMarkup(ctx.chat.id, messageId, undefined, extra.reply_markup);
+      }
       return { message_id: messageId };
     } catch {
       await deleteMessageSafe(ctx, messageId);

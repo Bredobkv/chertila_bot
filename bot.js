@@ -762,8 +762,7 @@ async function showHelp(ctx) {
 
 async function showProfile(ctx) {
   const profile = getProfile(ctx.from.id);
-  const isRegistered = profile && profile.name && profile.name.trim().length >= 2;
-  const text = profile ? buildProfileText(profile) : '<b>Профиль</b>\n\nДля оформления заказов необходимо зарегистрироваться — указать ваше имя.';
+  const text = profile ? buildProfileText(profile) : '<b>Профиль</b>\n\nДля оформления заказов необходимо заполнить имя и телефон.';
   const extra = profile ? getProfileKeyboard() : Markup.inlineKeyboard([
     [Markup.button.callback('✏️ Заполнить профиль', 'profile:create')]
   ]);
@@ -809,12 +808,18 @@ async function saveProfileField(ctx, field, value) {
 
 async function startDraft(ctx) {
   const profile = getProfile(ctx.from.id);
-  if (!profile || !profile.name || profile.name.trim().length < 2) {
-    return sendHtml(
-      ctx,
-      '<b>Регистрация required</b>\n\nДля создания заказа необходимо заполнить профиль. Нажмите <b>👤 Профиль</b> и укажите ваше имя.',
-      getMainKeyboard(isAdmin(ctx))
-    );
+  const isRegistered = profile && profile.name && profile.name.trim().length >= 2 && profile.phone && profile.phone.trim().length >= 3;
+  
+  if (!isRegistered) {
+    let message = '<b>Регистрация</b>\n\nДля создания заказа необходимо заполнить профиль. Нажмите <b>👤 Профиль</b>.';
+    
+    if (profile && profile.name && profile.name.trim().length >= 2 && (!profile.phone || !profile.phone.trim())) {
+      message = '<b>Регистрация</b>\n\nНеобходимо указать номер телефона. Нажмите <b>👤 Профиль</b> → <b>📱 Телефон</b>.';
+    } else if (!profile || !profile.name || profile.name.trim().length < 2) {
+      message = '<b>Регистрация</b>\n\nНеобходимо указать имя. Нажмите <b>👤 Профиль</b> → <b>✏️ Изменить имя</b>.';
+    }
+    
+    return sendHtml(ctx, message, getMainKeyboard(isAdmin(ctx)));
   }
 
   await clearFlowMessage(ctx);

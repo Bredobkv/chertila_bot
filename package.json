@@ -1,7 +1,8 @@
 {
   "scripts": {
     "start": "node bot.js",
-    "check": "node --check bot.js"
+    "check": "node --check bot.js",
+    "dashboard": "node dashboard.js"
   },
   "dependencies": {
     "dotenv": "^17.4.0",

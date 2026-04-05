@@ -9,6 +9,8 @@ const ADMIN_ID = Number(process.env.ADMIN_ID);
 const STATE_FILE = path.join(__dirname, 'bot-state.json');
 const MIN_PRICE_BYN = 4;
 const MAX_PRICE_BYN = 20;
+const REMINDER_INTERVAL_MS = 60 * 60 * 1000;
+const OVERDUE_HOURS = 24;
 
 const DEADLINES = {
   urgent: { label: 'Срочно', factor: 1.55, description: 'максимальный приоритет' },
@@ -44,7 +46,7 @@ function ensureEnv() {
 
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) {
-    return { seq: 1, orders: {}, profiles: {} };
+    return { seq: 1, orders: {}, profiles: {}, users: [] };
   }
 
   try {
@@ -52,10 +54,11 @@ function loadState() {
     return {
       seq: Number.isInteger(raw.seq) && raw.seq > 0 ? raw.seq : 1,
       orders: raw.orders && typeof raw.orders === 'object' ? raw.orders : {},
-      profiles: raw.profiles && typeof raw.profiles === 'object' ? raw.profiles : {}
+      profiles: raw.profiles && typeof raw.profiles === 'object' ? raw.profiles : {},
+      users: Array.isArray(raw.users) ? raw.users : []
     };
   } catch {
-    return { seq: 1, orders: {}, profiles: {} };
+    return { seq: 1, orders: {}, profiles: {}, users: [] };
   }
 }
 
@@ -174,6 +177,7 @@ function isAdmin(ctx) {
 function getMainKeyboard(adminMode) {
   const rows = [
     ['✨ Новый заказ', '📦 Мои заказы'],
+    ['📊 Моя статистика', '🧮 Калькулятор'],
     ['👤 Профиль', 'ℹ️ Как это работает'],
     ['❌ Сбросить']
   ];
@@ -272,6 +276,144 @@ function getStats() {
   };
 }
 
+function trackUser(user) {
+  const userId = user.id;
+  if (!state.users.includes(userId)) {
+    state.users.push(userId);
+    persistState();
+  }
+}
+
+function searchOrders(query) {
+  const q = query.toLowerCase().trim();
+  const results = [];
+
+  for (const order of Object.values(state.orders)) {
+    if (order.id.toLowerCase().includes(q)) {
+      results.push(order);
+      continue;
+    }
+    if (order.clientName && order.clientName.toLowerCase().includes(q)) {
+      results.push(order);
+      continue;
+    }
+    if (order.clientUsername && order.clientUsername.toLowerCase().includes(q)) {
+      results.push(order);
+      continue;
+    }
+    if (getStageLabel(order.stage).toLowerCase().includes(q)) {
+      results.push(order);
+      continue;
+    }
+    if (order.task.toLowerCase().includes(q)) {
+      results.push(order);
+    }
+  }
+
+  return results.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+function getUserStats(userId) {
+  const orders = getOrdersByUser(userId);
+  const completed = orders.filter((o) => ['done', 'picked_up'].includes(o.stage));
+  const totalSpent = completed.reduce((sum, o) => sum + (o.finalPrice || 0), 0);
+  const totalOrders = orders.length;
+
+  return {
+    totalOrders,
+    completedOrders: completed.length,
+    totalSpent,
+    activeOrders: orders.filter((o) => ['pending_review', 'priced', 'in_progress'].includes(o.stage)).length
+  };
+}
+
+function buildUserStatsText(userId) {
+  const stats = getUserStats(userId);
+  return [
+    '<b>Твоя статистика</b>',
+    '',
+    `Всего заказов: <b>${stats.totalOrders}</b>`,
+    `Активных: <b>${stats.activeOrders}</b>`,
+    `Завершено: <b>${stats.completedOrders}</b>`,
+    `Потрачено: <b>${escapeHtml(formatMoney(stats.totalSpent))}</b>`
+  ].join('\n');
+}
+
+function getPriceCalculatorKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('Срочно', 'calc:deadline:urgent'), Markup.button.callback('Сегодня', 'calc:deadline:today')],
+    [Markup.button.callback('Завтра', 'calc:deadline:tomorrow'), Markup.button.callback('Без спешки', 'calc:deadline:week')],
+    [Markup.button.callback('Сбросить', 'calc:reset')]
+  ]);
+}
+
+function getPriceCalculatorLevelKeyboard(draft) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('Стандарт', 'calc:level:basic'), Markup.button.callback('Усиленный', 'calc:level:strong'), Markup.button.callback('Максимум', 'calc:level:premium')],
+    [Markup.button.callback('🔄 Назад к сроку', 'calc:back_deadline')],
+    [Markup.button.callback('↩️ В меню', 'calc:menu')]
+  ]);
+}
+
+function buildPriceCalculatorText(draft) {
+  if (!draft.task) {
+    return '<b>Калькулятор цены</b>\n\nВведите описание задачи для расчёта стоимости.';
+  }
+
+  const price = getEstimatedPrice(draft);
+  const lines = [
+    '<b>Калькулятор цены</b>',
+    '',
+    `<b>Задача:</b> ${escapeHtml(draft.task.substring(0, 50))}${draft.task.length > 50 ? '...' : ''}`,
+  ];
+
+  if (draft.deadline) {
+    lines.push(`<b>Срок:</b> ${escapeHtml(getDeadlineLabel(draft.deadline))}`);
+  }
+  if (draft.level) {
+    lines.push(`<b>Пакет:</b> ${escapeHtml(getLevelLabel(draft.level))}`);
+  }
+  lines.push('');
+  lines.push(`<b>Ориентировочная цена:</b> <code>${escapeHtml(formatMoney(price))}</code>`);
+
+  return lines.join('\n');
+}
+
+function getOverdueOrders() {
+  const now = Date.now();
+  const threshold = OVERDUE_HOURS * 60 * 60 * 1000;
+
+  return getOrdersArray().filter((order) => {
+    if (order.stage !== 'in_progress') return false;
+    const updatedAt = new Date(order.updatedAt).getTime();
+    return (now - updatedAt) > threshold;
+  });
+}
+
+async function sendBroadcast(bot, message, filterStage = null) {
+  let users = state.users;
+
+  if (filterStage) {
+    const ordersByStage = getOrdersArray().filter((o) => o.stage === filterStage);
+    const userIds = new Set(ordersByStage.map((o) => o.clientId));
+    users = users.filter((id) => userIds.has(id));
+  }
+
+  let success = 0;
+  let failed = 0;
+
+  for (const userId of users) {
+    try {
+      await bot.telegram.sendMessage(userId, message, { parse_mode: 'HTML' });
+      success++;
+    } catch {
+      failed++;
+    }
+  }
+
+  return { success, failed, total: users.length };
+}
+
 function buildOrderSummary(order, options = {}) {
   const lines = [];
 
@@ -361,13 +503,17 @@ function buildAttentionOrdersText() {
 }
 
 function buildAdminPanelKeyboard() {
-  const activeOrders = getActiveOrders().slice(0, 8);
+  const activeOrders = getActiveOrders().slice(0, 6);
   const rows = [
     [
-      Markup.button.callback('📋 Актуальные заказы', 'admin:attention'),
-      Markup.button.callback('🔄 Обновить панель', 'admin:panel')
+      Markup.button.callback('📋 Заказы', 'admin:attention'),
+      Markup.button.callback('🔍 Поиск', 'admin:search')
     ],
-    [Markup.button.callback('🧹 Сбросить статистику', 'admin:reset')]
+    [
+      Markup.button.callback('📢 Рассылка', 'admin:broadcast'),
+      Markup.button.callback('🔄 Обновить', 'admin:panel')
+    ],
+    [Markup.button.callback('🧹 Сброс статистику', 'admin:reset')]
   ];
 
   activeOrders.forEach((order) => {
@@ -375,6 +521,43 @@ function buildAdminPanelKeyboard() {
   });
 
   return Markup.inlineKeyboard(rows);
+}
+
+function getBroadcastKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('📢 Всем пользователям', 'broadcast:all')],
+    [Markup.button.callback('🕓 На рассмотрении', 'broadcast:pending_review')],
+    [Markup.button.callback('💵 С ценой', 'broadcast:priced')],
+    [Markup.button.callback('🚧 В работе', 'broadcast:in_progress')],
+    [Markup.button.callback('✅ Завершённые', 'broadcast:done')],
+    [Markup.button.callback('↩️ Назад', 'admin:panel')]
+  ]);
+}
+
+function getSearchKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('🕓 На рассмотрении', 'search:pending_review')],
+    [Markup.button.callback('💵 С ценой', 'search:priced')],
+    [Markup.button.callback('🚧 В работе', 'search:in_progress')],
+    [Markup.button.callback('✅ Завершённые', 'search:done')],
+    [Markup.button.callback('↩️ Назад', 'admin:panel')]
+  ]);
+}
+
+function buildSearchResultsText(results, query) {
+  if (!results.length) {
+    return `<b>Поиск: "${escapeHtml(query)}"</b>\n\nНичего не найдено.`;
+  }
+
+  return [
+    `<b>Результаты поиска: "${escapeHtml(query)}"</b>`,
+    '',
+    ...results.slice(0, 10).map((order) => {
+      const price = order.finalPrice || order.estimatedPrice;
+      return `• <b>${order.id}</b> — ${escapeHtml(getStageLabel(order.stage))} — ${escapeHtml(order.clientName)} — ${escapeHtml(formatMoney(price))}`;
+    }),
+    results.length > 10 ? `\nПоказано 10 из ${results.length} результатов.` : ''
+  ].join('\n');
 }
 
 function buildAttentionOrdersKeyboard(orders) {
@@ -822,7 +1005,9 @@ function createBot() {
     if (!ctx.session) {
       ctx.session = {};
     }
-
+    if (ctx.from) {
+      trackUser(ctx.from);
+    }
     return next();
   });
 
@@ -832,6 +1017,15 @@ function createBot() {
   bot.hears('✨ Новый заказ', startDraft);
   bot.hears('📦 Мои заказы', showOrdersForUser);
   bot.hears('👤 Профиль', showProfile);
+  bot.hears('📊 Моя статистика', async (ctx) => {
+    return sendHtml(ctx, buildUserStatsText(ctx.from.id), getMainKeyboard(isAdmin(ctx)));
+  });
+  bot.hears('🧮 Калькулятор', async (ctx) => {
+    await clearFlowMessage(ctx);
+    ctx.session.flow = 'price_calc';
+    ctx.session.calcDraft = { task: '', deadline: '', level: '' };
+    return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
+  });
   bot.hears('❌ Сбросить', async (ctx) => {
     await clearFlowMessage(ctx);
     resetSession(ctx);
@@ -886,6 +1080,28 @@ function createBot() {
       if (field && ['name', 'phone', 'email', 'notes'].includes(field)) {
         return saveProfileField(ctx, field, text);
       }
+    }
+
+    if (ctx.session.flow === 'price_calc') {
+      ctx.session.calcDraft.task = text;
+      return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
+    }
+
+    if (ctx.session.flow === 'admin_search') {
+      const results = searchOrders(text);
+      resetSession(ctx);
+      return sendHtml(ctx, buildSearchResultsText(results, text), getSearchKeyboard());
+    }
+
+    if (ctx.session.flow === 'admin_broadcast') {
+      const filterStage = ctx.session.broadcastFilter || null;
+      const result = await sendBroadcast(bot, text, filterStage);
+      resetSession(ctx);
+      return sendHtml(
+        ctx,
+        `<b>Рассылка отправлена</b>\n\nДоставлено: ${result.success}\nНе доставлено: ${result.failed}\nВсего получателей: ${result.total}`,
+        buildAdminPanelKeyboard()
+      );
     }
 
     if (ctx.session.flow !== 'create_order') {
@@ -1080,6 +1296,66 @@ function createBot() {
       return sendHtml(ctx, 'Введите новое значение в сообщении.');
     }
 
+    if (data === 'calc:reset') {
+      if (ctx.session.flow !== 'price_calc') return;
+      ctx.session.calcDraft = { task: '', deadline: '', level: '' };
+      return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
+    }
+
+    if (data.startsWith('calc:deadline:')) {
+      if (ctx.session.flow !== 'price_calc') return;
+      ctx.session.calcDraft.deadline = data.split(':')[2];
+      return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
+    }
+
+    if (data.startsWith('calc:level:')) {
+      if (ctx.session.flow !== 'price_calc') return;
+      ctx.session.calcDraft.level = data.split(':')[2];
+      return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorLevelKeyboard(ctx.session.calcDraft));
+    }
+
+    if (data === 'calc:back_deadline') {
+      if (ctx.session.flow !== 'price_calc') return;
+      ctx.session.calcDraft.level = '';
+      return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
+    }
+
+    if (data === 'calc:menu') {
+      resetSession(ctx);
+      return showWelcome(ctx);
+    }
+
+    if (data === 'admin:search') {
+      if (!isAdmin(ctx)) return;
+      ctx.session.flow = 'admin_search';
+      return showFlowMessage(ctx, '<b>Поиск заказов</b>\n\nВведите ID заказа, имя клиента или статус для поиска.');
+    }
+
+    if (data === 'admin:broadcast') {
+      if (!isAdmin(ctx)) return;
+      return sendHtml(ctx, '<b>Рассылка</b>\n\nВыберите получателей или введите сообщение для всех пользователей.', getBroadcastKeyboard());
+    }
+
+    if (data.startsWith('search:')) {
+      if (!isAdmin(ctx)) return;
+      const stage = data.split(':')[1];
+      const results = getOrdersArray().filter((o) => o.stage === stage);
+      return sendHtml(ctx, buildSearchResultsText(results, `статус: ${getStageLabel(stage)}`), getSearchKeyboard());
+    }
+
+    if (data.startsWith('broadcast:')) {
+      if (!isAdmin(ctx)) return;
+      const filterStage = data.split(':')[1];
+      if (filterStage === 'all') {
+        ctx.session.flow = 'admin_broadcast';
+        ctx.session.broadcastFilter = null;
+      } else {
+        ctx.session.flow = 'admin_broadcast';
+        ctx.session.broadcastFilter = filterStage;
+      }
+      return showFlowMessage(ctx, '<b>Введите текст рассылки</b>\n\nСообщение будет отправлено выбранным пользователям.');
+    }
+
     if (data === 'user:list') {
       return showOrdersForUser(ctx);
     }
@@ -1261,6 +1537,18 @@ async function startBot() {
   const bot = createBot();
   await bot.launch();
   console.log('🚀 Бот работает в усиленном режиме');
+
+  setInterval(async () => {
+    const overdue = getOverdueOrders();
+    if (overdue.length > 0) {
+      const list = overdue.map((o) => `• ${o.id} — ${o.clientName}`).join('\n');
+      await bot.telegram.sendMessage(
+        ADMIN_ID,
+        `<b>⚠️ Просроченные заказы</b>\n\nЗаказы в работе более ${OVERDUE_HOURS} часов:\n\n${list}`,
+        { parse_mode: 'HTML' }
+      );
+    }
+  }, REMINDER_INTERVAL_MS);
 }
 
 if (require.main === module) {

@@ -36,14 +36,17 @@ State is written to `bot-state.json` after every mutation via `persistState()`. 
 - `users` — array of all user IDs (for broadcast)
 
 ## Order Flow
-1. User starts order → step through task → deadline → requirements → level
-2. Draft submitted → saves to state → notifies admin
-3. Admin sets price → order enters `priced` stage → notifies user
-4. Admin starts work → `in_progress` → admin completes → `done`
+1. User registers with name via profile
+2. User starts order → step through task → deadline → requirements → level
+3. Draft submitted → saves to state → notifies admin
+4. Admin sets price → order enters `priced` stage → notifies user
+5. Admin starts work → `in_progress` → admin completes → `done`
+
+## Registration
+Users must fill in their name in the profile before they can create orders. Without a name, the "Новый заказ" button shows a registration prompt.
 
 ## Features
 - **User profiles** — save name, phone, email, notes; auto-fills in orders
-- **Price calculator** — 🧮 button for quick price estimation without creating order
 - **User stats** — 📊 shows order history, total spent
 - **Admin search** — search orders by ID, client name, or status
 - **Admin broadcast** — send messages to all users or filtered by order stage

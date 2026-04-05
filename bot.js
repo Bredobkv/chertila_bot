@@ -177,9 +177,8 @@ function isAdmin(ctx) {
 function getMainKeyboard(adminMode) {
   const rows = [
     ['✨ Новый заказ', '📦 Мои заказы'],
-    ['📊 Моя статистика', '🧮 Калькулятор'],
-    ['👤 Профиль', 'ℹ️ Как это работает'],
-    ['❌ Сбросить']
+    ['📊 Моя статистика', '👤 Профиль'],
+    ['ℹ️ Как это работает', '❌ Сбросить']
   ];
 
   if (adminMode) {
@@ -337,46 +336,6 @@ function buildUserStatsText(userId) {
     `Завершено: <b>${stats.completedOrders}</b>`,
     `Потрачено: <b>${escapeHtml(formatMoney(stats.totalSpent))}</b>`
   ].join('\n');
-}
-
-function getPriceCalculatorKeyboard() {
-  return Markup.inlineKeyboard([
-    [Markup.button.callback('Срочно', 'calc:deadline:urgent'), Markup.button.callback('Сегодня', 'calc:deadline:today')],
-    [Markup.button.callback('Завтра', 'calc:deadline:tomorrow'), Markup.button.callback('Без спешки', 'calc:deadline:week')],
-    [Markup.button.callback('Сбросить', 'calc:reset')]
-  ]);
-}
-
-function getPriceCalculatorLevelKeyboard(draft) {
-  return Markup.inlineKeyboard([
-    [Markup.button.callback('Стандарт', 'calc:level:basic'), Markup.button.callback('Усиленный', 'calc:level:strong'), Markup.button.callback('Максимум', 'calc:level:premium')],
-    [Markup.button.callback('🔄 Назад к сроку', 'calc:back_deadline')],
-    [Markup.button.callback('↩️ В меню', 'calc:menu')]
-  ]);
-}
-
-function buildPriceCalculatorText(draft) {
-  if (!draft.task) {
-    return '<b>Калькулятор цены</b>\n\nВведите описание задачи для расчёта стоимости.';
-  }
-
-  const price = getEstimatedPrice(draft);
-  const lines = [
-    '<b>Калькулятор цены</b>',
-    '',
-    `<b>Задача:</b> ${escapeHtml(draft.task.substring(0, 50))}${draft.task.length > 50 ? '...' : ''}`,
-  ];
-
-  if (draft.deadline) {
-    lines.push(`<b>Срок:</b> ${escapeHtml(getDeadlineLabel(draft.deadline))}`);
-  }
-  if (draft.level) {
-    lines.push(`<b>Пакет:</b> ${escapeHtml(getLevelLabel(draft.level))}`);
-  }
-  lines.push('');
-  lines.push(`<b>Ориентировочная цена:</b> <code>${escapeHtml(formatMoney(price))}</code>`);
-
-  return lines.join('\n');
 }
 
 function getOverdueOrders() {
@@ -803,7 +762,8 @@ async function showHelp(ctx) {
 
 async function showProfile(ctx) {
   const profile = getProfile(ctx.from.id);
-  const text = profile ? buildProfileText(profile) : '<b>Профиль</b>\n\nПрофиль не заполнен. Нажмите кнопку ниже, чтобы добавить информацию.';
+  const isRegistered = profile && profile.name && profile.name.trim().length >= 2;
+  const text = profile ? buildProfileText(profile) : '<b>Профиль</b>\n\nДля оформления заказов необходимо зарегистрироваться — указать ваше имя.';
   const extra = profile ? getProfileKeyboard() : Markup.inlineKeyboard([
     [Markup.button.callback('✏️ Заполнить профиль', 'profile:create')]
   ]);
@@ -848,10 +808,18 @@ async function saveProfileField(ctx, field, value) {
 }
 
 async function startDraft(ctx) {
+  const profile = getProfile(ctx.from.id);
+  if (!profile || !profile.name || profile.name.trim().length < 2) {
+    return sendHtml(
+      ctx,
+      '<b>Регистрация required</b>\n\nДля создания заказа необходимо заполнить профиль. Нажмите <b>👤 Профиль</b> и укажите ваше имя.',
+      getMainKeyboard(isAdmin(ctx))
+    );
+  }
+
   await clearFlowMessage(ctx);
   ctx.session.flow = 'create_order';
   ctx.session.step = 'task';
-  const profile = getProfile(ctx.from.id);
   ctx.session.draft = createDraft(ctx.from, profile);
   delete ctx.session.adminAction;
 
@@ -1023,12 +991,6 @@ function createBot() {
   bot.hears('📊 Моя статистика', async (ctx) => {
     return sendHtml(ctx, buildUserStatsText(ctx.from.id), getMainKeyboard(isAdmin(ctx)));
   });
-  bot.hears('🧮 Калькулятор', async (ctx) => {
-    await clearFlowMessage(ctx);
-    ctx.session.flow = 'price_calc';
-    ctx.session.calcDraft = { task: '', deadline: '', level: '', requirements: '', attachments: [] };
-    return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
-  });
   bot.hears('❌ Сбросить', async (ctx) => {
     await clearFlowMessage(ctx);
     resetSession(ctx);
@@ -1083,11 +1045,6 @@ function createBot() {
       if (field && ['name', 'phone', 'email', 'notes'].includes(field)) {
         return saveProfileField(ctx, field, text);
       }
-    }
-
-    if (ctx.session.flow === 'price_calc') {
-      ctx.session.calcDraft.task = text;
-      return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
     }
 
     if (ctx.session.flow === 'admin_search') {
@@ -1297,35 +1254,6 @@ function createBot() {
 
     if (data.startsWith('profile:save:')) {
       return sendHtml(ctx, 'Введите новое значение в сообщении.');
-    }
-
-    if (data === 'calc:reset') {
-      if (ctx.session.flow !== 'price_calc') return;
-      ctx.session.calcDraft = { task: '', deadline: '', level: '', requirements: '', attachments: [] };
-      return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
-    }
-
-    if (data.startsWith('calc:deadline:')) {
-      if (ctx.session.flow !== 'price_calc') return;
-      ctx.session.calcDraft.deadline = data.split(':')[2];
-      return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
-    }
-
-    if (data.startsWith('calc:level:')) {
-      if (ctx.session.flow !== 'price_calc') return;
-      ctx.session.calcDraft.level = data.split(':')[2];
-      return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorLevelKeyboard(ctx.session.calcDraft));
-    }
-
-    if (data === 'calc:back_deadline') {
-      if (ctx.session.flow !== 'price_calc') return;
-      ctx.session.calcDraft.level = '';
-      return showFlowMessage(ctx, buildPriceCalculatorText(ctx.session.calcDraft), getPriceCalculatorKeyboard());
-    }
-
-    if (data === 'calc:menu') {
-      resetSession(ctx);
-      return showWelcome(ctx);
     }
 
     if (data === 'admin:search') {

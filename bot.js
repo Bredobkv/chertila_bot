@@ -44,17 +44,18 @@ function ensureEnv() {
 
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) {
-    return { seq: 1, orders: {} };
+    return { seq: 1, orders: {}, profiles: {} };
   }
 
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
     return {
       seq: Number.isInteger(raw.seq) && raw.seq > 0 ? raw.seq : 1,
-      orders: raw.orders && typeof raw.orders === 'object' ? raw.orders : {}
+      orders: raw.orders && typeof raw.orders === 'object' ? raw.orders : {},
+      profiles: raw.profiles && typeof raw.profiles === 'object' ? raw.profiles : {}
     };
   } catch {
-    return { seq: 1, orders: {} };
+    return { seq: 1, orders: {}, profiles: {} };
   }
 }
 
@@ -173,7 +174,8 @@ function isAdmin(ctx) {
 function getMainKeyboard(adminMode) {
   const rows = [
     ['✨ Новый заказ', '📦 Мои заказы'],
-    ['ℹ️ Как это работает', '❌ Сбросить']
+    ['👤 Профиль', 'ℹ️ Как это работает'],
+    ['❌ Сбросить']
   ];
 
   if (adminMode) {
@@ -393,7 +395,7 @@ function buildResetStatsKeyboard() {
   ]);
 }
 
-function createDraft(user) {
+function createDraft(user, profile = null) {
   return {
     task: '',
     deadline: '',
@@ -401,9 +403,70 @@ function createDraft(user) {
     level: '',
     attachments: [],
     clientId: user.id,
-    clientName: getUserName(user),
-    clientUsername: getUserUsername(user)
+    clientName: profile?.name || getUserName(user),
+    clientUsername: getUserUsername(user),
+    clientPhone: profile?.phone || '',
+    clientEmail: profile?.email || '',
+    clientNotes: profile?.notes || ''
   };
+}
+
+function createDefaultProfile(user) {
+  return {
+    userId: user.id,
+    name: getUserName(user),
+    username: getUserUsername(user),
+    phone: '',
+    email: '',
+    notes: '',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function getProfile(userId) {
+  return state.profiles[userId] || null;
+}
+
+function saveProfile(userId, patch) {
+  const existing = state.profiles[userId] || {};
+  state.profiles[userId] = {
+    ...existing,
+    ...patch,
+    userId,
+    updatedAt: new Date().toISOString()
+  };
+  persistState();
+  return state.profiles[userId];
+}
+
+function buildProfileText(profile) {
+  const lines = [
+    '<b>Профиль</b>',
+    '',
+    `<b>Имя:</b> ${escapeHtml(profile.name || 'Не указано')}`,
+    `<b>Телефон:</b> ${escapeHtml(profile.phone || 'Не указан')}`,
+    `<b>Email:</b> ${escapeHtml(profile.email || 'Не указан')}`,
+    `<b>Заметки:</b> ${escapeHtml(profile.notes || 'Нет')}`
+  ];
+  return lines.join('\n');
+}
+
+function getProfileKeyboard() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('✏️ Изменить имя', 'profile:edit:name')],
+    [Markup.button.callback('📱 Телефон', 'profile:edit:phone')],
+    [Markup.button.callback('✉️ Email', 'profile:edit:email')],
+    [Markup.button.callback('📝 Заметки', 'profile:edit:notes')],
+    [Markup.button.callback('↩️ Назад', 'profile:back')]
+  ]);
+}
+
+function getProfileEditKeyboard(field) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('💾 Сохранить', `profile:save:${field}`)],
+    [Markup.button.callback('↩️ Отмена', 'profile:view')]
+  ]);
 }
 
 function resetSession(ctx) {
@@ -552,11 +615,58 @@ async function showHelp(ctx) {
   );
 }
 
+async function showProfile(ctx) {
+  const profile = getProfile(ctx.from.id);
+  const text = profile ? buildProfileText(profile) : '<b>Профиль</b>\n\nПрофиль не заполнен. Нажмите кнопку ниже, чтобы добавить информацию.';
+  const extra = profile ? getProfileKeyboard() : Markup.inlineKeyboard([
+    [Markup.button.callback('✏️ Заполнить профиль', 'profile:create')]
+  ]);
+  return sendHtml(ctx, text, extra);
+}
+
+async function showProfileEdit(ctx, field) {
+  const profile = getProfile(ctx.from.id);
+  const fieldLabels = {
+    name: 'имя',
+    phone: 'телефон',
+    email: 'email',
+    notes: 'заметки'
+  };
+  const fieldValues = {
+    name: profile?.name || '',
+    phone: profile?.phone || '',
+    email: profile?.email || '',
+    notes: profile?.notes || ''
+  };
+
+  ctx.session.flow = 'profile_edit';
+  ctx.session.editField = field;
+
+  return showFlowMessage(
+    ctx,
+    `<b>Введите ${fieldLabels[field]}</b>\n\nТекущее значение: ${escapeHtml(fieldValues[field]) || 'не указано'}`
+  );
+}
+
+async function saveProfileField(ctx, field, value) {
+  const userId = ctx.from.id;
+  const profile = getProfile(userId) || createDefaultProfile(ctx.from);
+
+  saveProfile(userId, { [field]: value, username: getUserUsername(ctx.from) });
+
+  ctx.session.flow = null;
+  delete ctx.session.editField;
+
+  const updatedProfile = getProfile(userId);
+  return showFlowMessage(ctx, 'Профиль сохранён.', getProfileKeyboard());
+}
+
 async function startDraft(ctx) {
   await clearFlowMessage(ctx);
   ctx.session.flow = 'create_order';
   ctx.session.step = 'task';
-  ctx.session.draft = createDraft(ctx.from);
+  const profile = getProfile(ctx.from.id);
+  ctx.session.draft = createDraft(ctx.from, profile);
   delete ctx.session.adminAction;
 
   return showFlowMessage(
@@ -721,6 +831,7 @@ function createBot() {
   bot.hears('ℹ️ Как это работает', showHelp);
   bot.hears('✨ Новый заказ', startDraft);
   bot.hears('📦 Мои заказы', showOrdersForUser);
+  bot.hears('👤 Профиль', showProfile);
   bot.hears('❌ Сбросить', async (ctx) => {
     await clearFlowMessage(ctx);
     resetSession(ctx);
@@ -768,6 +879,13 @@ function createBot() {
         `Цена для <b>${order.id}</b> сохранена: <b>${escapeHtml(formatMoney(price))}</b>.`,
         getAdminOrderControls(order)
       );
+    }
+
+    if (ctx.session.flow === 'profile_edit') {
+      const field = ctx.session.editField;
+      if (field && ['name', 'phone', 'email', 'notes'].includes(field)) {
+        return saveProfileField(ctx, field, text);
+      }
     }
 
     if (ctx.session.flow !== 'create_order') {
@@ -932,6 +1050,34 @@ function createBot() {
       ctx.session.step = 'summary';
 
       return showDraftSummary(ctx);
+    }
+
+    if (data === 'profile:create') {
+      const profile = getProfile(ctx.from.id);
+      if (!profile) {
+        const newProfile = saveProfile(ctx.from.id, createDefaultProfile(ctx.from));
+      }
+      return showProfile(ctx);
+    }
+
+    if (data === 'profile:view') {
+      return showProfile(ctx);
+    }
+
+    if (data === 'profile:back') {
+      resetSession(ctx);
+      return showWelcome(ctx);
+    }
+
+    if (data.startsWith('profile:edit:')) {
+      const field = data.split(':')[2];
+      if (['name', 'phone', 'email', 'notes'].includes(field)) {
+        return showProfileEdit(ctx, field);
+      }
+    }
+
+    if (data.startsWith('profile:save:')) {
+      return sendHtml(ctx, 'Введите новое значение в сообщении.');
     }
 
     if (data === 'user:list') {

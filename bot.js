@@ -285,6 +285,7 @@ function buildAdminPanelKeyboard() {
       Markup.button.callback('💾 БД', 'admin:database')
     ],
     [
+      Markup.button.callback('📨 Написать клиенту', 'admin:send_to_client'),
       Markup.button.callback('🔄 Обновить', 'admin:panel')
     ],
     [Markup.button.callback('🧹 Сброс статистику', 'admin:reset')]
@@ -833,6 +834,35 @@ function createBot() {
       );
     }
 
+    if (ctx.session.flow === 'admin_send_message') {
+      const orderId = text.trim();
+      const order = db.getOrder(orderId);
+      if (!order) {
+        return sendHtml(ctx, 'Заказ не найден. Введите корректный ID заказа.', Markup.inlineKeyboard([[Markup.button.callback('↩️ Отмена', 'admin:panel')]]));
+      }
+      ctx.session.targetOrderId = orderId;
+      ctx.session.flow = 'admin_send_message_text';
+      return sendHtml(ctx, `<b>📨 Сощение для заказа ${orderId}</b>\n\nКлиент: ${escapeHtml(order.task)}\n\nВведите текст сообщения:`, Markup.inlineKeyboard([[Markup.button.callback('↩️ Отмена', 'admin:panel')]]));
+    }
+
+    if (ctx.session.flow === 'admin_send_message_text') {
+      const orderId = ctx.session.targetOrderId;
+      const order = db.getOrder(orderId);
+      if (!order) {
+        resetSession(ctx);
+        return sendHtml(ctx, 'Заказ не найден.', buildAdminPanelKeyboard());
+      }
+      
+      await bot.telegram.sendMessage(
+        order.client_id,
+        `<b>📨 Сообщение от администратора:</b>\n\n${escapeHtml(text)}`,
+        { parse_mode: 'HTML', ...getMainKeyboard(false) }
+      );
+      
+      resetSession(ctx);
+      return sendHtml(ctx, `<b>✅ Сообщение отправлено клиенту заказа ${orderId}</b>`, buildAdminPanelKeyboard());
+    }
+
     if (ctx.session.step === 'custom_date') {
       const datePattern = /^(\d{2})\.(\d{2})\.(\d{4})$/;
       const match = text.match(datePattern);
@@ -1095,6 +1125,12 @@ function createBot() {
     if (data === 'admin:panel') {
       if (!isAdmin(ctx)) return;
       return showAdminPanel(ctx);
+    }
+
+    if (data === 'admin:send_to_client') {
+      if (!isAdmin(ctx)) return;
+      ctx.session.flow = 'admin_send_message';
+      return sendHtml(ctx, '<b>📨 Отправить сообщение клиенту</b>\n\nВведите ID заказа, которому нужно отправить сообщение:', Markup.inlineKeyboard([[Markup.button.callback('↩️ Отмена', 'admin:panel')]]));
     }
 
     if (data === 'admin:attention') {

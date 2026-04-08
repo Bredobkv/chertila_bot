@@ -124,6 +124,7 @@ function getEstimatedPrice(draft) {
 }
 
 function isAdmin(ctx) {
+  console.log('isAdmin check:', ctx.from?.id, 'ADMIN_ID:', ADMIN_ID);
   return ctx.from?.id === ADMIN_ID;
 }
 
@@ -461,11 +462,13 @@ async function showFlowMessage(ctx, text, extra = {}) {
 }
 
 async function showWelcome(ctx) {
+  console.log('showWelcome called, user id:', ctx.from.id, 'ADMIN_ID:', ADMIN_ID);
   await clearFlowMessage(ctx);
   resetSession(ctx);
   db.createUser(ctx.from);
   
   const adminMode = isAdmin(ctx);
+  console.log('adminMode:', adminMode);
   const text = adminMode
     ? '<b>Добро пожаловать в продвинутую админ-панель</b>\n\nУправляй заказами, ценами, статусами и смотри сводку в одном месте.'
     : '<b>Привет!</b>\n\nЯ собираю заказ в удобную карточку, считаю предварительную цену, принимаю файлы и показываю статус без лишних сообщений.';

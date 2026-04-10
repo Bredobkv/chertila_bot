@@ -86,6 +86,14 @@ function initDatabase() {
     INSERT OR IGNORE INTO seq (name, value) VALUES ('order_seq', 1);
   `);
 
+  try {
+    database.prepare('ALTER TABLE profiles ADD COLUMN promo_discount_until DATETIME');
+  } catch (e) {
+    if (!e.message.includes('duplicate column name')) {
+      console.log('Migration: promo_discount_until column already exists or error:', e.message);
+    }
+  }
+
   return database;
 }
 

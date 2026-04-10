@@ -164,12 +164,19 @@ function applyPromoDiscount(userId, discount) {
 
 function getPromoDiscountAmount(userId) {
   const activePromos = getActivePromos();
+  console.log('getPromoDiscountAmount for', userId, 'activePromos:', activePromos);
   const promo = activePromos[userId];
   
-  if (!promo) return 0;
+  if (!promo) {
+    console.log('No active promo for user', userId);
+    return 0;
+  }
   
   const expiresAt = new Date(promo.expiresAt);
-  if (expiresAt.getTime() > Date.now()) {
+  const now = Date.now();
+  console.log('expiresAt:', promo.expiresAt, 'now:', now, 'isValid:', expiresAt.getTime() > now);
+  
+  if (expiresAt.getTime() > now) {
     return promo.discount;
   }
   delete activePromos[userId];

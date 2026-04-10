@@ -87,11 +87,13 @@ function initDatabase() {
   `);
 
   try {
-    database.prepare('ALTER TABLE profiles ADD COLUMN promo_discount_until DATETIME');
-  } catch (e) {
-    if (!e.message.includes('duplicate column name')) {
-      console.log('Migration: promo_discount_until column already exists or error:', e.message);
+    const tableInfo = database.prepare('PRAGMA table_info(profiles)').all();
+    const hasColumn = tableInfo.some(col => col.name === 'promo_discount_until');
+    if (!hasColumn) {
+      database.prepare('ALTER TABLE profiles ADD COLUMN promo_discount_until DATETIME');
     }
+  } catch (e) {
+    console.log('Migration: promo_discount_until:', e.message);
   }
 
   return database;

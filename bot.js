@@ -220,8 +220,12 @@ function buildOrderSummary(order, options = {}) {
   if (order.final_price || order.finalPrice) {
     let priceText = formatMoney(order.final_price || order.finalPrice);
     if (order.price_multiplier === 2) priceText += ' (x2)';
-    if (order.promo_discount) priceText += ` (-${Math.round(order.promo_discount * 100)}%)`;
     lines.push(`<b>Финальная цена:</b> ${escapeHtml(priceText)}`);
+  }
+
+  if (order.promo_discount) {
+    const discountPercent = Math.round(order.promo_discount * 100);
+    lines.push(`<b>Скидка:</b> -${discountPercent}% ✅`);
   }
 
   if (options.includeClient) {

@@ -147,15 +147,22 @@ function loadPromocodes() {
 
 function validatePromocode(code) {
   try {
+    console.log('Validating promo code:', code);
+    console.log('PROMOCODES_FILE:', PROMOCODES_FILE);
+    
     if (!fs.existsSync(PROMOCODES_FILE)) {
+      console.log('File does not exist!');
       return { valid: false, error: 'Промокод недействителен' };
     }
     
     const content = fs.readFileSync(PROMOCODES_FILE, 'utf-8');
+    console.log('File content:', content);
     const promocodes = JSON.parse(content);
     
     const normalized = code.trim().toUpperCase();
+    console.log('Normalized:', normalized);
     const discount = promocodes[normalized];
+    console.log('Discount:', discount);
     
     if (discount === undefined) {
       return { valid: false, error: 'Промокод недействителен' };
@@ -163,6 +170,7 @@ function validatePromocode(code) {
     
     delete promocodes[normalized];
     fs.writeFileSync(PROMOCODES_FILE, JSON.stringify(promocodes, null, 2));
+    console.log('Promo code used, remaining:', promocodes);
     
     return { valid: true, discount: discount / 100, days: PROMO_DAYS };
   } catch (e) {

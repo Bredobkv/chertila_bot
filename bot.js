@@ -228,6 +228,13 @@ function buildOrderSummary(order, options = {}) {
     lines.push(`<b>Клиент:</b> ${escapeHtml(clientName)} ${escapeHtml(clientUsername)} (${order.client_id})`);
   }
 
+  if (order.profile_name || order.profile_phone) {
+    const profileInfo = [];
+    if (order.profile_name) profileInfo.push(escapeHtml(order.profile_name));
+    if (order.profile_phone) profileInfo.push(escapeHtml(order.profile_phone));
+    lines.push(`<b>Контакт:</b> ${profileInfo.join(' • ')}`);
+  }
+
   return lines.join('\n');
 }
 

@@ -219,6 +219,12 @@ function getOrderWithAttachments(orderId) {
   const attachments = database.prepare('SELECT * FROM attachments WHERE order_id = ?').all(orderId);
   order.attachments = attachments;
   
+  const profile = database.prepare('SELECT name, phone FROM profiles WHERE user_id = ?').get(order.client_id);
+  if (profile) {
+    order.profile_name = profile.name;
+    order.profile_phone = profile.phone;
+  }
+  
   return order;
 }
 

@@ -143,22 +143,34 @@ function loadPromocodes() {
 }
 
 function validatePromocode(code) {
-  const promocodes = loadPromocodes();
-  const normalized = code.trim().toUpperCase();
-  
-  if (!promocodes.has(normalized)) {
-    return { valid: false, error: 'Промокод недействителен' };
+  try {
+    if (!fs.existsSync(PROMOCODES_FILE)) {
+      return { valid: false, error: 'Промокод недействителен' };
+    }
+    
+    const content = fs.readFileSync(PROMOCODES_FILE, 'utf-8');
+    const promocodes = content.split('\n')
+      .map(line => line.trim().toUpperCase())
+      .filter(line => line.length > 0);
+    
+    const normalized = code.trim().toUpperCase();
+    const index = promocodes.indexOf(normalized);
+    
+    if (index === -1) {
+      return { valid: false, error: 'Промокод недействителен' };
+    }
+    
+    promocodes.splice(index, 1);
+    fs.writeFileSync(PROMOCODES_FILE, promocodes.join('\n') + '\n');
+    
+    cachedPromocodes = null;
+    promocodesLastLoaded = 0;
+    
+    return { valid: true, discount: PROMO_DISCOUNT, days: PROMO_DAYS };
+  } catch (e) {
+    console.error('validatePromocode error:', e);
+    return { valid: false, error: 'Ошибка проверки промокода' };
   }
-  
-  promocodes.delete(normalized);
-  
-  const newContent = Array.from(promocodes).join('\n');
-  fs.writeFileSync(PROMOCODES_FILE, newContent + '\n');
-  
-  cachedPromocodes = new Set(promocodes);
-  promocodesLastLoaded = 0;
-  
-  return { valid: true, discount: PROMO_DISCOUNT, days: PROMO_DAYS };
 }
 
 function applyPromoDiscount(userId) {

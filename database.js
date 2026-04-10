@@ -32,31 +32,21 @@ function getDb() {
 
 function runMigrations(database) {
   try {
-    database.exec("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS promo_discount_until TEXT");
-  } catch (e) {
-    console.log('Migration promo_discount_until:', e.message);
-  }
-  try {
-    database.exec("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS promo_discount REAL DEFAULT 0.15");
-  } catch (e) {
-    console.log('Migration promo_discount:', e.message);
-  }
-  
-  try {
     const tableInfo = database.prepare("PRAGMA table_info(profiles)").all();
     const hasUntil = tableInfo.find(c => c.name === 'promo_discount_until');
     const hasDiscount = tableInfo.find(c => c.name === 'promo_discount');
-    console.log('Table columns:', tableInfo.map(c => c.name));
+    console.log('Current columns:', tableInfo.map(c => c.name));
+    
     if (!hasUntil) {
       database.exec("ALTER TABLE profiles ADD COLUMN promo_discount_until TEXT");
-      console.log('Added promo_discount_until');
+      console.log('Added promo_discount_until column');
     }
     if (!hasDiscount) {
       database.exec("ALTER TABLE profiles ADD COLUMN promo_discount REAL");
-      console.log('Added promo_discount');
+      console.log('Added promo_discount column');
     }
   } catch (e) {
-    console.log('Check/fix columns:', e.message);
+    console.log('Migration error (safe to ignore if columns exist):', e.message);
   }
 }
 

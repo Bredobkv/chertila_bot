@@ -37,6 +37,7 @@ function initDatabase() {
       phone TEXT,
       email TEXT,
       notes TEXT,
+      promo_discount_until DATETIME,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
@@ -95,6 +96,82 @@ function addLog(action, targetType, targetId, adminId = null, userId = null, det
     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
   `);
   stmt.run(action, targetType, targetId, adminId, userId, details);
+}
+
+const PROMOCODES_FILE = path.join(__dirname, 'promocodes.txt');
+const PROMO_DISCOUNT = 0.15;
+const PROMO_DAYS = 2;
+
+let cachedPromocodes = null;
+let promocodesLastLoaded = 0;
+
+function loadPromocodes() {
+  const now = Date.now();
+  if (cachedPromocodes && now - promocodesLastLoaded < 60000) {
+    return cachedPromocodes;
+  }
+  
+  try {
+    if (!fs.existsSync(PROMOCODES_FILE)) {
+      cachedPromocodes = new Set();
+      return cachedPromocodes;
+    }
+    
+    const content = fs.readFileSync(PROMOCODES_FILE, 'utf-8');
+    const codes = content.split('\n')
+      .map(line => line.trim().toUpperCase())
+      .filter(line => line.length > 0);
+    
+    cachedPromocodes = new Set(codes);
+    promocodesLastLoaded = now;
+    return cachedPromocodes;
+  } catch (e) {
+    console.error('Failed to load promocodes:', e);
+    cachedPromocodes = new Set();
+    return cachedPromocodes;
+  }
+}
+
+function validatePromocode(code) {
+  const promocodes = loadPromocodes();
+  const normalized = code.trim().toUpperCase();
+  
+  if (!promocodes.has(normalized)) {
+    return { valid: false, error: 'Промокод недействителен' };
+  }
+  
+  promocodes.delete(normalized);
+  
+  const newContent = Array.from(promocodes).join('\n');
+  fs.writeFileSync(PROMOCODES_FILE, newContent + '\n');
+  
+  cachedPromocodes = new Set(promocodes);
+  promocodesLastLoaded = 0;
+  
+  return { valid: true, discount: PROMO_DISCOUNT, days: PROMO_DAYS };
+}
+
+function applyPromoDiscount(userId) {
+  const database = getDb();
+  const expiresAt = new Date(Date.now() + PROMO_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  
+  const existing = database.prepare('SELECT promo_discount_until FROM profiles WHERE user_id = ?').get(userId);
+  
+  if (existing) {
+    database.prepare('UPDATE profiles SET promo_discount_until = ? WHERE user_id = ?').run(expiresAt, userId);
+  } else {
+    database.prepare('INSERT INTO profiles (user_id, promo_discount_until) VALUES (?, ?)').run(userId, expiresAt);
+  }
+}
+
+function hasPromoDiscount(userId) {
+  const database = getDb();
+  const profile = database.prepare('SELECT promo_discount_until FROM profiles WHERE user_id = ?').get(userId);
+  
+  if (!profile || !profile.promo_discount_until) return false;
+  
+  const until = new Date(profile.promo_discount_until);
+  return until.getTime() > Date.now();
 }
 
 function createUser(user) {
@@ -292,13 +369,23 @@ function updateOrder(orderId, patch) {
 
 function setOrderPrice(orderId, price) {
   const database = getDb();
+  const order = database.prepare('SELECT client_id FROM orders WHERE id = ?').get(orderId);
+  if (!order) return null;
+  
+  const hasDiscount = hasPromoDiscount(order.client_id);
+  let finalPrice = price;
+  if (hasDiscount) {
+    finalPrice = price * (1 - PROMO_DISCOUNT);
+  }
+  
   database.prepare(`
     UPDATE orders 
     SET final_price = ?, stage = 'awaiting_confirmation', updated_at = datetime('now')
     WHERE id = ?
-  `).run(price, orderId);
+  `).run(finalPrice, orderId);
   
-  addLog('price_set', 'order', orderId, null, null, `Price: ${price}`);
+  const discountInfo = hasDiscount ? ` (15% discount applied)` : '';
+  addLog('price_set', 'order', orderId, null, null, `Price: ${price}${discountInfo}`);
   return getOrder(orderId);
 }
 
@@ -621,5 +708,8 @@ module.exports = {
   getBackupFiles,
   startBackupScheduler,
   closeDb,
-  addLog
+  addLog,
+  validatePromocode,
+  applyPromoDiscount,
+  hasPromoDiscount
 };

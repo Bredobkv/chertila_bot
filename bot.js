@@ -132,7 +132,8 @@ function getMainKeyboard(adminMode) {
   const rows = [
     ['✨ Новый заказ', '📦 Мои заказы'],
     ['📊 Моя статистика', '👤 Профиль'],
-    ['ℹ️ Как это работает', '❌ Сбросить']
+    ['🎫 Промокод', 'ℹ️ Как это работает'],
+    ['❌ Сбросить']
   ];
   if (adminMode) rows.unshift(['🛠 Админ-панель']);
   return Markup.keyboard(rows).resize();
@@ -219,6 +220,7 @@ function buildOrderSummary(order, options = {}) {
   if (order.final_price || order.finalPrice) {
     let priceText = formatMoney(order.final_price || order.finalPrice);
     if (order.price_multiplier === 2) priceText += ' (x2)';
+    if (options.applyDiscount) priceText += ' (-15%)';
     lines.push(`<b>Финальная цена:</b> ${escapeHtml(priceText)}`);
   }
 
@@ -791,6 +793,11 @@ function createBot() {
     if (!isAdmin(ctx)) return;
     return showAdminPanel(ctx);
   });
+  bot.hears('🎫 Промокод', async (ctx) => {
+    ctx.session.awaitingPromo = true;
+    return sendHtml(ctx, '<b>🎫 Введите промокод</b>\n\nВведите промокод для активации скидки 15% на 2 дня.', 
+      Markup.inlineKeyboard([[Markup.button.callback('↩️ Отмена', 'cancel:promo')]]));
+  });
 
   bot.on('text', async (ctx) => {
     const text = ctx.message.text.trim();
@@ -824,6 +831,22 @@ function createBot() {
       if (field && ['name', 'phone', 'email', 'notes'].includes(field)) {
         return saveProfileField(ctx, field, text);
       }
+    }
+
+    if (ctx.session.awaitingPromo) {
+      delete ctx.session.awaitingPromo;
+      const result = db.validatePromocode(text);
+      
+      if (!result.valid) {
+        return sendHtml(ctx, `<b>❌ Ошибка:</b> ${result.error}`, getMainKeyboard(isAdmin(ctx)));
+      }
+      
+      db.applyPromoDiscount(ctx.from.id);
+      
+      return sendHtml(ctx, 
+        `<b>✅ Промокод активирован!</b>\n\nСкидка <b>15%</b> действует 2 дня. Все заказы в этот период будут со скидкой.`,
+        getMainKeyboard(isAdmin(ctx))
+      );
     }
 
     if (ctx.session.flow === 'admin_search') {
@@ -980,6 +1003,11 @@ function createBot() {
   bot.on('callback_query', async (ctx) => {
     const data = ctx.callbackQuery.data || '';
     await ctx.answerCbQuery();
+
+    if (data === 'cancel:promo') {
+      delete ctx.session.awaitingPromo;
+      return sendHtml(ctx, 'Ввод промокода отменён.', getMainKeyboard(isAdmin(ctx)));
+    }
 
     if (data === 'draft:attachments') {
       if (ctx.session.flow !== 'create_order') {

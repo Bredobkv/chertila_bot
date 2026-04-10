@@ -201,12 +201,15 @@ function applyPromoDiscount(userId, discount) {
   const database = getDb();
   const expiresAt = new Date(Date.now() + PROMO_DAYS * 24 * 60 * 60 * 1000).toISOString();
   
-  const existing = database.prepare('SELECT promo_discount_until FROM profiles WHERE user_id = ?').get(userId);
+  const existing = database.prepare('SELECT * FROM profiles WHERE user_id = ?').get(userId);
+  console.log('Existing profile:', existing);
   
   if (existing) {
     database.prepare('UPDATE profiles SET promo_discount_until = ?, promo_discount = ? WHERE user_id = ?').run(expiresAt, discount, userId);
+    console.log('Updated profile with promo');
   } else {
     database.prepare('INSERT INTO profiles (user_id, promo_discount_until, promo_discount) VALUES (?, ?, ?)').run(userId, expiresAt, discount);
+    console.log('Inserted profile with promo');
   }
 }
 

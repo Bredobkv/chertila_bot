@@ -1,0 +1,4 @@
+root@vps-blinchik ~/chertila_bot (main) [SIGHUP]# git pull --rebase=false
+Auto-merging promocodes.json
+CONFLICT (content): Merge conflict in promocodes.json
+Automatic merge failed; fix conflicts and then commit the result.

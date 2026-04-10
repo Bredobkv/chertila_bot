@@ -220,7 +220,7 @@ function buildOrderSummary(order, options = {}) {
   if (order.final_price || order.finalPrice) {
     let priceText = formatMoney(order.final_price || order.finalPrice);
     if (order.price_multiplier === 2) priceText += ' (x2)';
-    if (options.applyDiscount) priceText += ' (-15%)';
+    if (order.promo_discount) priceText += ` (-${Math.round(order.promo_discount * 100)}%)`;
     lines.push(`<b>Финальная цена:</b> ${escapeHtml(priceText)}`);
   }
 
@@ -841,10 +841,11 @@ function createBot() {
         return sendHtml(ctx, `<b>❌ Ошибка:</b> ${result.error}`, getMainKeyboard(isAdmin(ctx)));
       }
       
-      db.applyPromoDiscount(ctx.from.id);
+      db.applyPromoDiscount(ctx.from.id, result.discount);
+      const discountPercent = Math.round(result.discount * 100);
       
       return sendHtml(ctx, 
-        `<b>✅ Промокод активирован!</b>\n\nСкидка <b>15%</b> действует 2 дня. Все заказы в этот период будут со скидкой.`,
+        `<b>✅ Промокод активирован!</b>\n\nСкидка <b>${discountPercent}%</b> действует 2 дня. Все заказы в этот период будут со скидкой.`,
         getMainKeyboard(isAdmin(ctx))
       );
     }

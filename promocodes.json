@@ -1,1 +1,5 @@
-["SALE15", "CHERTILA", "WELCOME"]
+{
+  "SALE15": 15,
+  "CHERTILA": 15,
+  "WELCOME": 15
+}

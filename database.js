@@ -22,13 +22,10 @@ function getDb() {
       migrationRan = true;
       try {
         db.exec('ALTER TABLE profiles ADD COLUMN promo_discount_until DATETIME');
-        console.log('Migration: promo_discount_until column added');
+        db.exec('ALTER TABLE profiles ADD COLUMN promo_discount REAL DEFAULT 0.15');
+        console.log('Migration: promo columns added');
       } catch (e) {
-        if (e.message.includes('duplicate column')) {
-          console.log('Migration: promo_discount_until already exists');
-        } else {
-          console.log('Migration error:', e.message);
-        }
+        console.log('Migration:', e.message);
       }
     }
   }
@@ -155,46 +152,49 @@ function validatePromocode(code) {
     }
     
     const content = fs.readFileSync(PROMOCODES_FILE, 'utf-8');
-    let promocodes = JSON.parse(content);
+    const promocodes = JSON.parse(content);
     
     const normalized = code.trim().toUpperCase();
-    const index = promocodes.indexOf(normalized);
+    const discount = promocodes[normalized];
     
-    if (index === -1) {
+    if (discount === undefined) {
       return { valid: false, error: 'Промокод недействителен' };
     }
     
-    promocodes.splice(index, 1);
+    delete promocodes[normalized];
     fs.writeFileSync(PROMOCODES_FILE, JSON.stringify(promocodes, null, 2));
     
-    return { valid: true, discount: PROMO_DISCOUNT, days: PROMO_DAYS };
+    return { valid: true, discount: discount / 100, days: PROMO_DAYS };
   } catch (e) {
     console.error('validatePromocode error:', e);
     return { valid: false, error: 'Ошибка проверки промокода' };
   }
 }
 
-function applyPromoDiscount(userId) {
+function applyPromoDiscount(userId, discount) {
   const database = getDb();
   const expiresAt = new Date(Date.now() + PROMO_DAYS * 24 * 60 * 60 * 1000).toISOString();
   
   const existing = database.prepare('SELECT promo_discount_until FROM profiles WHERE user_id = ?').get(userId);
   
   if (existing) {
-    database.prepare('UPDATE profiles SET promo_discount_until = ? WHERE user_id = ?').run(expiresAt, userId);
+    database.prepare('UPDATE profiles SET promo_discount_until = ?, promo_discount = ? WHERE user_id = ?').run(expiresAt, discount, userId);
   } else {
-    database.prepare('INSERT INTO profiles (user_id, promo_discount_until) VALUES (?, ?)').run(userId, expiresAt);
+    database.prepare('INSERT INTO profiles (user_id, promo_discount_until, promo_discount) VALUES (?, ?, ?)').run(userId, expiresAt, discount);
   }
 }
 
-function hasPromoDiscount(userId) {
+function getPromoDiscountAmount(userId) {
   const database = getDb();
   const profile = database.prepare('SELECT promo_discount_until FROM profiles WHERE user_id = ?').get(userId);
   
-  if (!profile || !profile.promo_discount_until) return false;
+  if (!profile || !profile.promo_discount_until) return 0;
   
   const until = new Date(profile.promo_discount_until);
-  return until.getTime() > Date.now();
+  if (until.getTime() > Date.now()) {
+    return profile.promo_discount || PROMO_DISCOUNT;
+  }
+  return 0;
 }
 
 function createUser(user) {
@@ -319,10 +319,16 @@ function getOrderWithAttachments(orderId) {
   const attachments = database.prepare('SELECT * FROM attachments WHERE order_id = ?').all(orderId);
   order.attachments = attachments;
   
-  const profile = database.prepare('SELECT name, phone FROM profiles WHERE user_id = ?').get(order.client_id);
+  const profile = database.prepare('SELECT name, phone, promo_discount, promo_discount_until FROM profiles WHERE user_id = ?').get(order.client_id);
   if (profile) {
     order.profile_name = profile.name;
     order.profile_phone = profile.phone;
+    if (profile.promo_discount_until) {
+      const until = new Date(profile.promo_discount_until);
+      if (until.getTime() > Date.now()) {
+        order.promo_discount = profile.promo_discount;
+      }
+    }
   }
   
   return order;
@@ -395,10 +401,12 @@ function setOrderPrice(orderId, price) {
   const order = database.prepare('SELECT client_id FROM orders WHERE id = ?').get(orderId);
   if (!order) return null;
   
-  const hasDiscount = hasPromoDiscount(order.client_id);
+  const discount = getPromoDiscountAmount(order.client_id);
   let finalPrice = price;
-  if (hasDiscount) {
-    finalPrice = price * (1 - PROMO_DISCOUNT);
+  let discountText = '';
+  if (discount > 0) {
+    finalPrice = price * (1 - discount);
+    discountText = ` (${Math.round(discount * 100)}% discount applied)`;
   }
   
   database.prepare(`
@@ -407,8 +415,7 @@ function setOrderPrice(orderId, price) {
     WHERE id = ?
   `).run(finalPrice, orderId);
   
-  const discountInfo = hasDiscount ? ` (15% discount applied)` : '';
-  addLog('price_set', 'order', orderId, null, null, `Price: ${price}${discountInfo}`);
+  addLog('price_set', 'order', orderId, null, null, `Price: ${price}${discountText}`);
   return getOrder(orderId);
 }
 
@@ -734,5 +741,5 @@ module.exports = {
   addLog,
   validatePromocode,
   applyPromoDiscount,
-  hasPromoDiscount
+  getPromoDiscountAmount
 };

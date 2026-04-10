@@ -10,20 +10,26 @@ const BACKUP_INTERVAL_MS = 2 * 24 * 60 * 60 * 1000;
 
 let db = null;
 
+let migrationRan = false;
+
 function getDb() {
   if (!db) {
     db = new Database(DB_FILE);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     
-    try {
-      const tableInfo = db.prepare('PRAGMA table_info(profiles)').all();
-      const hasColumn = tableInfo.some(col => col.name === 'promo_discount_until');
-      if (!hasColumn) {
-        db.prepare('ALTER TABLE profiles ADD COLUMN promo_discount_until DATETIME');
+    if (!migrationRan) {
+      migrationRan = true;
+      try {
+        db.exec('ALTER TABLE profiles ADD COLUMN promo_discount_until DATETIME');
+        console.log('Migration: promo_discount_until column added');
+      } catch (e) {
+        if (e.message.includes('duplicate column')) {
+          console.log('Migration: promo_discount_until already exists');
+        } else {
+          console.log('Migration error:', e.message);
+        }
       }
-    } catch (e) {
-      console.log('Migration: promo_discount_until:', e.message);
     }
   }
   return db;

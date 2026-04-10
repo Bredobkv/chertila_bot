@@ -841,7 +841,6 @@ function createBot() {
         return sendHtml(ctx, `<b>❌ Ошибка:</b> ${result.error}`, getMainKeyboard(isAdmin(ctx)));
       }
       
-      db.applyPromoDiscount(ctx.from.id, result.discount);
       const discountPercent = Math.round(result.discount * 100);
       
       return sendHtml(ctx, 

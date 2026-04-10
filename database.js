@@ -17,37 +17,8 @@ function getDb() {
     db = new Database(DB_FILE);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
-    
-    if (!migrationRan) {
-      migrationRan = true;
-      try {
-        runMigrations(db);
-      } catch (e) {
-        console.log('Migration error:', e.message);
-      }
-    }
   }
   return db;
-}
-
-function runMigrations(database) {
-  try {
-    const tableInfo = database.prepare("PRAGMA table_info(profiles)").all();
-    const hasUntil = tableInfo.find(c => c.name === 'promo_discount_until');
-    const hasDiscount = tableInfo.find(c => c.name === 'promo_discount');
-    console.log('Current columns:', tableInfo.map(c => c.name));
-    
-    if (!hasUntil) {
-      database.exec("ALTER TABLE profiles ADD COLUMN promo_discount_until TEXT");
-      console.log('Added promo_discount_until column');
-    }
-    if (!hasDiscount) {
-      database.exec("ALTER TABLE profiles ADD COLUMN promo_discount REAL");
-      console.log('Added promo_discount column');
-    }
-  } catch (e) {
-    console.log('Migration error (safe to ignore if columns exist):', e.message);
-  }
 }
 
 function initDatabase() {
@@ -130,65 +101,49 @@ function addLog(action, targetType, targetId, adminId = null, userId = null, det
 }
 
 const PROMOCODES_FILE = path.join(__dirname, 'promocodes.json');
+const ACTIVE_PROMOS_FILE = path.join(__dirname, 'active_promos.json');
 const PROMO_DISCOUNT = 0.15;
 const PROMO_DAYS = 2;
 
-let cachedPromocodes = null;
-let promocodesLastLoaded = 0;
-
-function loadPromocodes() {
-  const now = Date.now();
-  if (cachedPromocodes && now - promocodesLastLoaded < 60000) {
-    return cachedPromocodes;
-  }
-  
+function getActivePromos() {
   try {
-    if (!fs.existsSync(PROMOCODES_FILE)) {
-      cachedPromocodes = new Set();
-      return cachedPromocodes;
+    if (!fs.existsSync(ACTIVE_PROMOS_FILE)) {
+      return {};
     }
-    
-    const content = fs.readFileSync(PROMOCODES_FILE, 'utf-8');
-    const codes = content.split('\n')
-      .map(line => line.trim().toUpperCase())
-      .filter(line => line.length > 0);
-    
-    cachedPromocodes = new Set(codes);
-    promocodesLastLoaded = now;
-    return cachedPromocodes;
+    return JSON.parse(fs.readFileSync(ACTIVE_PROMOS_FILE, 'utf-8'));
   } catch (e) {
-    console.error('Failed to load promocodes:', e);
-    cachedPromocodes = new Set();
-    return cachedPromocodes;
+    console.error('Failed to load active promos:', e);
+    return {};
+  }
+}
+
+function saveActivePromos(promos) {
+  try {
+    fs.writeFileSync(ACTIVE_PROMOS_FILE, JSON.stringify(promos, null, 2));
+  } catch (e) {
+    console.error('Failed to save active promos:', e);
   }
 }
 
 function validatePromocode(code) {
+  const normalized = code.trim().toUpperCase();
+  
   try {
-    console.log('Validating promo code:', code);
-    console.log('PROMOCODES_FILE:', PROMOCODES_FILE);
-    
-    if (!fs.existsSync(PROMOCODES_FILE)) {
-      console.log('File does not exist!');
-      return { valid: false, error: 'Промокод недействителен' };
-    }
-    
     const content = fs.readFileSync(PROMOCODES_FILE, 'utf-8');
-    console.log('File content:', content);
     const promocodes = JSON.parse(content);
-    
-    const normalized = code.trim().toUpperCase();
-    console.log('Normalized:', normalized);
     const discount = promocodes[normalized];
-    console.log('Discount:', discount);
     
-    if (discount === undefined) {
+    if (!discount) {
       return { valid: false, error: 'Промокод недействителен' };
     }
     
     delete promocodes[normalized];
     fs.writeFileSync(PROMOCODES_FILE, JSON.stringify(promocodes, null, 2));
-    console.log('Promo code used, remaining:', promocodes);
+    
+    const activePromos = getActivePromos();
+    const expiresAt = new Date(Date.now() + PROMO_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    activePromos[normalized] = { userId: normalized, discount: discount / 100, expiresAt: expiresAt };
+    saveActivePromos(activePromos);
     
     return { valid: true, discount: discount / 100, days: PROMO_DAYS };
   } catch (e) {
@@ -198,31 +153,26 @@ function validatePromocode(code) {
 }
 
 function applyPromoDiscount(userId, discount) {
-  const database = getDb();
+  const activePromos = getActivePromos();
   const expiresAt = new Date(Date.now() + PROMO_DAYS * 24 * 60 * 60 * 1000).toISOString();
   
-  const existing = database.prepare('SELECT * FROM profiles WHERE user_id = ?').get(userId);
-  console.log('Existing profile:', existing);
-  
-  if (existing) {
-    database.prepare('UPDATE profiles SET promo_discount_until = ?, promo_discount = ? WHERE user_id = ?').run(expiresAt, discount, userId);
-    console.log('Updated profile with promo');
-  } else {
-    database.prepare('INSERT INTO profiles (user_id, promo_discount_until, promo_discount) VALUES (?, ?, ?)').run(userId, expiresAt, discount);
-    console.log('Inserted profile with promo');
-  }
+  activePromos[userId] = { discount: discount, expiresAt: expiresAt };
+  saveActivePromos(activePromos);
+  console.log('Applied promo for user', userId, 'discount:', discount);
 }
 
 function getPromoDiscountAmount(userId) {
-  const database = getDb();
-  const profile = database.prepare('SELECT promo_discount_until FROM profiles WHERE user_id = ?').get(userId);
+  const activePromos = getActivePromos();
+  const promo = activePromos[userId];
   
-  if (!profile || !profile.promo_discount_until) return 0;
+  if (!promo) return 0;
   
-  const until = new Date(profile.promo_discount_until);
-  if (until.getTime() > Date.now()) {
-    return profile.promo_discount || PROMO_DISCOUNT;
+  const expiresAt = new Date(promo.expiresAt);
+  if (expiresAt.getTime() > Date.now()) {
+    return promo.discount;
   }
+  delete activePromos[userId];
+  saveActivePromos(activePromos);
   return 0;
 }
 

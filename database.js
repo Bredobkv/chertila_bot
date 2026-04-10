@@ -15,6 +15,16 @@ function getDb() {
     db = new Database(DB_FILE);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
+    
+    try {
+      const tableInfo = db.prepare('PRAGMA table_info(profiles)').all();
+      const hasColumn = tableInfo.some(col => col.name === 'promo_discount_until');
+      if (!hasColumn) {
+        db.prepare('ALTER TABLE profiles ADD COLUMN promo_discount_until DATETIME');
+      }
+    } catch (e) {
+      console.log('Migration: promo_discount_until:', e.message);
+    }
   }
   return db;
 }
@@ -85,16 +95,6 @@ function initDatabase() {
 
     INSERT OR IGNORE INTO seq (name, value) VALUES ('order_seq', 1);
   `);
-
-  try {
-    const tableInfo = database.prepare('PRAGMA table_info(profiles)').all();
-    const hasColumn = tableInfo.some(col => col.name === 'promo_discount_until');
-    if (!hasColumn) {
-      database.prepare('ALTER TABLE profiles ADD COLUMN promo_discount_until DATETIME');
-    }
-  } catch (e) {
-    console.log('Migration: promo_discount_until:', e.message);
-  }
 
   return database;
 }

@@ -691,13 +691,15 @@ async function showOrderDetailsToAdmin(ctx, order) {
 }
 
 async function notifyAdminAboutOrder(bot, order) {
+  const fullOrder = db.getOrderWithAttachments(order.id);
+  
   await bot.telegram.sendMessage(
     ADMIN_ID,
-    buildOrderSummary(order, { includeClient: true, title: `Новый заказ ${order.id}` }),
-    { parse_mode: 'HTML', ...getAdminOrderControls(order) }
+    buildOrderSummary(fullOrder, { includeClient: true, title: `Новый заказ ${fullOrder.id}` }),
+    { parse_mode: 'HTML', ...getAdminOrderControls(fullOrder) }
   );
 
-  for (const attachment of order.attachments || []) {
+  for (const attachment of fullOrder.attachments || []) {
     if (attachment.type === 'photo') {
       await bot.telegram.sendPhoto(ADMIN_ID, attachment.file_id, { caption: `Вложение к ${order.id}` });
     }

@@ -108,7 +108,7 @@ function addLog(action, targetType, targetId, adminId = null, userId = null, det
   stmt.run(action, targetType, targetId, adminId, userId, details);
 }
 
-const PROMOCODES_FILE = path.join(__dirname, 'promocodes.txt');
+const PROMOCODES_FILE = path.join(__dirname, 'promocodes.json');
 const PROMO_DISCOUNT = 0.15;
 const PROMO_DAYS = 2;
 
@@ -149,9 +149,7 @@ function validatePromocode(code) {
     }
     
     const content = fs.readFileSync(PROMOCODES_FILE, 'utf-8');
-    const promocodes = content.split('\n')
-      .map(line => line.trim().toUpperCase())
-      .filter(line => line.length > 0);
+    let promocodes = JSON.parse(content);
     
     const normalized = code.trim().toUpperCase();
     const index = promocodes.indexOf(normalized);
@@ -161,10 +159,7 @@ function validatePromocode(code) {
     }
     
     promocodes.splice(index, 1);
-    fs.writeFileSync(PROMOCODES_FILE, promocodes.join('\n') + '\n');
-    
-    cachedPromocodes = null;
-    promocodesLastLoaded = 0;
+    fs.writeFileSync(PROMOCODES_FILE, JSON.stringify(promocodes, null, 2));
     
     return { valid: true, discount: PROMO_DISCOUNT, days: PROMO_DAYS };
   } catch (e) {

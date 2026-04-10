@@ -835,7 +835,7 @@ function createBot() {
 
     if (ctx.session.awaitingPromo) {
       delete ctx.session.awaitingPromo;
-      const result = db.validatePromocode(text);
+      const result = db.validatePromocode(text, ctx.from.id);
       
       if (!result.valid) {
         return sendHtml(ctx, `<b>❌ Ошибка:</b> ${result.error}`, getMainKeyboard(isAdmin(ctx)));

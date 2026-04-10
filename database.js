@@ -125,7 +125,7 @@ function saveActivePromos(promos) {
   }
 }
 
-function validatePromocode(code) {
+function validatePromocode(code, userId) {
   const normalized = code.trim().toUpperCase();
   
   try {
@@ -142,8 +142,9 @@ function validatePromocode(code) {
     
     const activePromos = getActivePromos();
     const expiresAt = new Date(Date.now() + PROMO_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    activePromos[normalized] = { userId: normalized, discount: discount / 100, expiresAt: expiresAt };
+    activePromos[userId] = { discount: discount / 100, expiresAt: expiresAt };
     saveActivePromos(activePromos);
+    console.log('Activated promo for user', userId, 'discount:', discount / 100);
     
     return { valid: true, discount: discount / 100, days: PROMO_DAYS };
   } catch (e) {
@@ -298,16 +299,15 @@ function getOrderWithAttachments(orderId) {
   const attachments = database.prepare('SELECT * FROM attachments WHERE order_id = ?').all(orderId);
   order.attachments = attachments;
   
-  const profile = database.prepare('SELECT name, phone, promo_discount, promo_discount_until FROM profiles WHERE user_id = ?').get(order.client_id);
+  const profile = database.prepare('SELECT name, phone FROM profiles WHERE user_id = ?').get(order.client_id);
   if (profile) {
     order.profile_name = profile.name;
     order.profile_phone = profile.phone;
-    if (profile.promo_discount_until) {
-      const until = new Date(profile.promo_discount_until);
-      if (until.getTime() > Date.now()) {
-        order.promo_discount = profile.promo_discount;
-      }
-    }
+  }
+  
+  const discount = getPromoDiscountAmount(order.client_id);
+  if (discount > 0) {
+    order.promo_discount = discount;
   }
   
   return order;

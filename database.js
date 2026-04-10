@@ -21,15 +21,31 @@ function getDb() {
     if (!migrationRan) {
       migrationRan = true;
       try {
-        db.exec('ALTER TABLE profiles ADD COLUMN promo_discount_until DATETIME');
-        db.exec('ALTER TABLE profiles ADD COLUMN promo_discount REAL DEFAULT 0.15');
-        console.log('Migration: promo columns added');
+        runMigrations(db);
       } catch (e) {
-        console.log('Migration:', e.message);
+        console.log('Migration error:', e.message);
       }
     }
   }
   return db;
+}
+
+function runMigrations(database) {
+  try {
+    database.exec("ALTER TABLE profiles ADD COLUMN promo_discount_until TEXT");
+  } catch (e) {
+    if (!e.message.includes('duplicate column')) {
+      console.log('Migration promo_discount_until:', e.message);
+    }
+  }
+  try {
+    database.exec("ALTER TABLE profiles ADD COLUMN promo_discount REAL DEFAULT 0.15");
+  } catch (e) {
+    if (!e.message.includes('duplicate column')) {
+      console.log('Migration promo_discount:', e.message);
+    }
+  }
+  console.log('Migrations complete');
 }
 
 function initDatabase() {

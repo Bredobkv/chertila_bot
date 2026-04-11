@@ -1,3 +1,6 @@
 node_modules/
 backups/
 active_promos.json
+bot.db
+bot.db-shm
+bot.db-wal

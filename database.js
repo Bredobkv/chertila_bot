@@ -467,6 +467,100 @@ function getStats() {
   };
 }
 
+function getRevenueStats(days = 30) {
+  const database = getDb();
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  
+  const orders = database.prepare(`
+    SELECT * FROM orders 
+    WHERE stage IN ('done', 'picked_up') 
+    AND created_at >= ?
+    ORDER BY created_at DESC
+  `).all(startDate.toISOString());
+  
+  const byDay = {};
+  let totalRevenue = 0;
+  let orderCount = orders.length;
+  
+  orders.forEach(o => {
+    const date = o.created_at.split(' ')[0];
+    if (!byDay[date]) {
+      byDay[date] = { revenue: 0, count: 0 };
+    }
+    byDay[date].revenue += o.final_price || 0;
+    byDay[date].count += 1;
+    totalRevenue += o.final_price || 0;
+  });
+  
+  const avgOrderValue = orderCount > 0 ? totalRevenue / orderCount : 0;
+  
+  return {
+    totalRevenue,
+    orderCount,
+    avgOrderValue,
+    byDay
+  };
+}
+
+function getOrdersByStage() {
+  const database = getDb();
+  const stages = database.prepare('SELECT stage, COUNT(*) as count FROM orders GROUP BY stage').all();
+  const result = {};
+  stages.forEach(s => {
+    result[s.stage] = s.count;
+  });
+  return result;
+}
+
+function getTopUsers(limit = 10) {
+  const database = getDb();
+  return database.prepare(`
+    SELECT u.id, u.username, u.first_name, u.last_name, 
+           COUNT(o.id) as order_count,
+           SUM(CASE WHEN o.stage IN ('done', 'picked_up') THEN o.final_price ELSE 0 END) as total_spent
+    FROM users u
+    LEFT JOIN orders o ON u.id = o.client_id
+    GROUP BY u.id
+    ORDER BY total_spent DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+function getOrdersByDay(days = 7) {
+  const database = getDb();
+  const result = [];
+  
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    const dateStr = date.toISOString().split('T')[0];
+    
+    const orders = database.prepare(`
+      SELECT COUNT(*) as count FROM orders 
+      WHERE date(created_at) = ?
+    `).get(dateStr);
+    
+    result.push({
+      date: dateStr,
+      dayName: date.toLocaleDateString('ru-RU', { weekday: 'short' }),
+      count: orders.count
+    });
+  }
+  
+  return result;
+}
+
+function getOrdersByLevel() {
+  const database = getDb();
+  const levels = database.prepare('SELECT level, COUNT(*) as count FROM orders WHERE level IS NOT NULL GROUP BY level').all();
+  const result = {};
+  levels.forEach(l => {
+    result[l.level || 'unknown'] = l.count;
+  });
+  return result;
+}
+
 function getUserStats(userId) {
   const database = getDb();
   const orders = database.prepare('SELECT * FROM orders WHERE client_id = ?').all(userId);
@@ -711,6 +805,11 @@ module.exports = {
   getStats,
   getUserStats,
   getDbStats,
+  getRevenueStats,
+  getOrdersByStage,
+  getTopUsers,
+  getOrdersByDay,
+  getOrdersByLevel,
   getLogs,
   clearOrders,
   clearUsers,

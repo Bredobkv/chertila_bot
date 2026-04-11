@@ -1,4 +1,22 @@
-root@vps-blinchik ~/chertila_bot (main) [SIGHUP]# git pull --rebase=false
-Auto-merging promocodes.json
-CONFLICT (content): Merge conflict in promocodes.json
-Automatic merge failed; fix conflicts and then commit the result.
+PS C:\Users\New\Desktop\chertila_bot> npm run dashboard
+
+> dashboard
+> node dashboard.js
+
+◇ injecting env (2) from .env // tip: ⌘ override existing { override: true }
+◇ injecting env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
+🌐 Дашборд доступен: http://localhost:3000
+
+C:\Users\New\Desktop\chertila_bot\node_modules\better-sqlite3\lib\methods\wrappers.js:5
+        return this[cppdb].prepare(sql, this, false);
+                           ^
+SqliteError: no such table: orders
+    at Database.prepare (C:\Users\New\Desktop\chertila_bot\node_modules\better-sqlite3\lib\methods\wrappers.js:5:21)
+    at Object.getStats (C:\Users\New\Desktop\chertila_bot\database.js:452:27)
+    at getDashboardHtml (C:\Users\New\Desktop\chertila_bot\dashboard.js:44:20)
+    at Server.<anonymous> (C:\Users\New\Desktop\chertila_bot\dashboard.js:497:11)
+    at Server.emit (node:events:508:28)
+    at parserOnIncoming (node:_http_server:1210:12)
+    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17) {
+  code: 'SQLITE_ERROR'
+}

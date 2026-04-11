@@ -782,6 +782,7 @@ function closeDb() {
 }
 
 module.exports = {
+  getDb,
   initDatabase,
   createUser,
   getUser,

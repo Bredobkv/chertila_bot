@@ -1,22 +1,14 @@
-PS C:\Users\New\Desktop\chertila_bot> npm run dashboard
-
-> dashboard
-> node dashboard.js
-
-◇ injecting env (2) from .env // tip: ⌘ override existing { override: true }
-◇ injecting env (0) from .env // tip: ⌘ multiple files { path: ['.env.local', '.env'] }
-🌐 Дашборд доступен: http://localhost:3000
-
-C:\Users\New\Desktop\chertila_bot\node_modules\better-sqlite3\lib\methods\wrappers.js:5
-        return this[cppdb].prepare(sql, this, false);
-                           ^
-SqliteError: no such table: orders
-    at Database.prepare (C:\Users\New\Desktop\chertila_bot\node_modules\better-sqlite3\lib\methods\wrappers.js:5:21)
-    at Object.getStats (C:\Users\New\Desktop\chertila_bot\database.js:452:27)
-    at getDashboardHtml (C:\Users\New\Desktop\chertila_bot\dashboard.js:44:20)
-    at Server.<anonymous> (C:\Users\New\Desktop\chertila_bot\dashboard.js:497:11)
-    at Server.emit (node:events:508:28)
-    at parserOnIncoming (node:_http_server:1210:12)
-    at HTTPParser.parserOnHeadersComplete (node:_http_common:125:17) {
-  code: 'SQLITE_ERROR'
-}
+root@vps-blinchik ~/chertila_bot (main) [1]# git pull
+remote: Enumerating objects: 3, done.
+remote: Counting objects: 100% (3/3), done.
+remote: Total 3 (delta 2), reused 3 (delta 2), pack-reused 0 (from 0)
+Unpacking objects: 100% (3/3), 270 bytes | 90.00 KiB/s, done.
+From https://github.com/Bredobkv/chertila_bot
+   0da1534..215a3b6  main       -> origin/main
+Updating fbf959b..215a3b6
+error: The following untracked working tree files would be overwritten by merge:
+        bot.db
+        bot.db-shm
+        bot.db-wal
+Please move or remove them before you merge.
+Aborting
